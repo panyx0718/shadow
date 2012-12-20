@@ -629,6 +629,9 @@ SlruPhysicalReadPage(SlruCtl ctl, int pageno, int slotno)
 	}
 #ifdef XP_TRACE_LRU_READ
 	gettimeofday(&tv, NULL);
+#ifdef STACK_TRACE
+	xp_stack_trace(TRACE_SIZE);
+#endif
 	ereport(TRACE_LEVEL,
 		(errmsg("%ld.%ld:\tREAD:\tSlruPhysicalReadPage:\tfile:%s",
 				tv.tv_sec, tv.tv_usec, path)));

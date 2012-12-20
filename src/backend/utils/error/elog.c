@@ -59,6 +59,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <ctype.h>
+#include <execinfo.h>
 #ifdef HAVE_SYSLOG
 #include <syslog.h>
 #endif
@@ -2976,4 +2977,24 @@ trace_recovery(int trace_level)
 		return LOG;
 
 	return trace_level;
+}
+
+void
+xp_stack_trace(const int size, const struct timeval tv)
+{
+	int i;
+
+	void *tBuf[size];
+	char **cBuf;
+	int tSize;
+
+	tSize = backtrace(tBuf, size);
+	cBuf = backtrace_symbols(tBuf, tSize);
+
+	for(i = 0; i < tSize; i++)
+	{
+		ereport(TRACE_LEVEL,
+			(errmsg("%ld.%ld:%s", tv.tv_sec, tv.tv_usec, cBuf[i])));
+	}
+	free(cBuf);
 }

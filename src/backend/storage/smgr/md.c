@@ -527,6 +527,9 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	}
 #ifdef XP_TRACE_MD_WRITE
 	gettimeofday(&tv, NULL);
+#ifdef TRACE_STACK
+	xp_stack_trace(TRACE_SIZE, tv);
+#endif
 	ereport(TRACE_LEVEL,
 		(errmsg("%ld.%ld:\tWRITE:mdextend:\tfile:%s\tforknum:%u\tblocknum:%u",
 				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
@@ -714,6 +717,9 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	}
 #ifdef XP_TRACE_MD_READ
 	gettimeofday(&tv, NULL);
+#ifdef TRACE_STACK
+	xp_stack_trace(TRACE_SIZE, tv);
+#endif
 	ereport(TRACE_LEVEL,
 		(errmsg("%ld.%ld:\tREAD:mdread:\tfile:%s\tforknum:%u\tblocknum:%u",
 				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
@@ -785,8 +791,10 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errhint("Check free disk space.")));
 	}
 #ifdef XP_TRACE_MD_WRITE
-
 	gettimeofday(&tv, NULL);
+#ifdef TRACE_STACK
+	xp_stack_trace(TRACE_SIZE, tv);
+#endif
 	ereport(TRACE_LEVEL,
 		(errmsg("%ld.%ld:\tWRITE:mdwrite:\tfile:%s\tforknum:%u\tblocknum:%u",
 				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
