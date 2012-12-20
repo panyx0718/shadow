@@ -524,6 +524,16 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						nbytes, BLCKSZ, blocknum),
 				 errhint("Check free disk space.")));
 	}
+#ifdef XP_TRACE_MD_WRITE
+	else
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		ereport(TRACE_LEVEL,
+			(errmsg("%ld.%ld:\t WRITE: mdextend:\t file:%s\t forknum:%u\t blocknum:%u\t ",
+					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
+	}
+#endif
 
 	if (!skipFsync && !SmgrIsTemp(reln))
 		register_dirty_segment(reln, forknum, v);
@@ -704,6 +714,16 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							blocknum, FilePathName(v->mdfd_vfd),
 							nbytes, BLCKSZ)));
 	}
+#ifdef XP_TRACE_MD_READ
+	else
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		ereport(TRACE_LEVEL,
+			(errmsg("%ld.%ld:\t READ:\t mdread:\t file:%s\t forknum:%u\t blocknum:%u\t ",
+					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
+	}
+#endif
 }
 
 /*
@@ -770,6 +790,16 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						nbytes, BLCKSZ),
 				 errhint("Check free disk space.")));
 	}
+#ifdef XP_TRACE_MD_WRITE
+	else
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		ereport(TRACE_LEVEL,
+			(errmsg("%ld.%ld:\t WRITE:\t mdwrite:\t file:%s\t forknum:%u\t blocknum:%u\t ",
+					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
+	}
+#endif
 
 	if (!skipFsync && !SmgrIsTemp(reln))
 		register_dirty_segment(reln, forknum, v);

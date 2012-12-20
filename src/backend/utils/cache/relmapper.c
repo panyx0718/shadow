@@ -607,7 +607,16 @@ load_relmap_file(bool shared)
 				(errcode_for_file_access(),
 				 errmsg("could not read relation mapping file \"%s\": %m",
 						mapfilename)));
-
+#ifdef XP_TRACE_RELMAP_READ
+	else
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		ereport(TRACE_LEVEL,
+			(errmsg("%ld.%ld:\t READ:\t load_relmap_file:\t file:%s\t ",
+					tv.tv_sec, tv.tv_usec, mapfilename)));
+	}
+#endif
 	close(fd);
 
 	/* check for correct magic number, etc */
@@ -740,6 +749,16 @@ write_relmap_file(bool shared, RelMapFile *newmap,
 				 errmsg("could not write to relation mapping file \"%s\": %m",
 						mapfilename)));
 	}
+#ifdef XP_TRACE_RELMAP_WRITE
+	else
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		ereport(TRACE_LEVEL,
+			(errmsg("%ld.%ld:\t WRITE:\t write_relmap_file:\t file:%s\t ",
+					tv.tv_sec, tv.tv_usec, mapfilename)));
+	}
+#endif
 
 	/*
 	 * We choose to fsync the data to disk before considering the task done.

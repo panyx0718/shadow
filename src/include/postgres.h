@@ -687,4 +687,61 @@ extern void ExceptionalCondition(const char *conditionName,
 					 const char *errorType,
 			 const char *fileName, int lineNumber) __attribute__((noreturn));
 
+/*
+ *	my debug definitions should be put here
+ */
+
+#define TRACE_LEVEL WARNING
+
+#define TRACE_RW
+#ifdef TRACE_RW
+/*
+ * magnetic read/write functions.
+ * Many functions depend on it.
+ * 1. share/local data buffer
+ * 2. b tree index
+ * 3. something elses
+ * routines depend on it has to provide blocknumber.
+ * Hence, those that are not based on block do not use it
+ */
+#define XP_TRACE_MD_WRITE
+#define XP_TRACE_MD_READ
+/*
+ * relation map files for global and local databases.
+ * On disk, they are in pg_filenode.map files in base and global.
+ */
+#define XP_TRACE_RELMAP_WRITE
+#define XP_TRACE_RELMAP_READ
+/*
+ * lru buffer in transaction access method.
+ * Many functions depend on it
+ * 1.clog
+ * 2.multi_trans
+ * 3.predicate
+ * 4.sub_trans
+ * It is mainly used for writing transaction status.
+ * On disk they are in pg_clog, pg_subtrans, pg_multixact directory
+ */
+#define XP_TRACE_LRU_WRITE
+#define XP_TRACE_LRU_READ
+
+#endif
+
+//#define DISABLE_WRITE
+#ifdef DISABLE_WRITE
+#define DISABLE_CHECKPOINT
+#define DISABLE_BGWRITE
+#define DISABLE_OTHER
+#endif
+
+
+
+
+
+
+
+
+
+
+
 #endif   /* POSTGRES_H */

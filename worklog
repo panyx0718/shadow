@@ -1,0 +1,2 @@
+disable checkpoint
+add return; in BufferSync(int flags) in bufmgr.c

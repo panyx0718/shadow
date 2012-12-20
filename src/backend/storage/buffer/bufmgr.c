@@ -1195,6 +1195,7 @@ UnpinBuffer(volatile BufferDesc *buf, bool fixOwner)
 static void
 BufferSync(int flags)
 {
+
 	int			buf_id;
 	int			num_to_scan;
 	int			num_to_write;
