@@ -41,6 +41,7 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "access/xact.h"
@@ -573,6 +574,7 @@ load_relmap_file(bool shared)
 	char		mapfilename[MAXPGPATH];
 	pg_crc32	crc;
 	int			fd;
+	struct timeval tv;
 
 	if (shared)
 	{
@@ -608,14 +610,10 @@ load_relmap_file(bool shared)
 				 errmsg("could not read relation mapping file \"%s\": %m",
 						mapfilename)));
 #ifdef XP_TRACE_RELMAP_READ
-	else
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\tREAD:\tload_relmap_file:\tfile:%s",
-					tv.tv_sec, tv.tv_usec, mapfilename)));
-	}
+	gettimeofday(&tv, NULL);
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tREAD:\tload_relmap_file:\tfile:%s",
+				tv.tv_sec, tv.tv_usec, mapfilename)));
 #endif
 	close(fd);
 
@@ -666,6 +664,7 @@ write_relmap_file(bool shared, RelMapFile *newmap,
 	int			fd;
 	RelMapFile *realmap;
 	char		mapfilename[MAXPGPATH];
+	struct timeval tv;
 
 	/*
 	 * Fill in the overhead fields and update CRC.
@@ -750,14 +749,10 @@ write_relmap_file(bool shared, RelMapFile *newmap,
 						mapfilename)));
 	}
 #ifdef XP_TRACE_RELMAP_WRITE
-	else
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\tWRITE:\twrite_relmap_file:\tfile:%s",
-					tv.tv_sec, tv.tv_usec, mapfilename)));
-	}
+	gettimeofday(&tv, NULL);
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tWRITE:\twrite_relmap_file:\tfile:%s",
+				tv.tv_sec, tv.tv_usec, mapfilename)));
 #endif
 
 	/*

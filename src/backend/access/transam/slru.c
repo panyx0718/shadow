@@ -50,7 +50,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
+#include <sys/time.h>
 #include "access/slru.h"
 #include "access/transam.h"
 #include "access/xlog.h"
@@ -583,6 +583,7 @@ SlruPhysicalReadPage(SlruCtl ctl, int pageno, int slotno)
 	int			offset = rpageno * BLCKSZ;
 	char		path[MAXPGPATH];
 	int			fd;
+	struct timeval tv;
 
 	SlruFileName(ctl, path, segno);
 
@@ -627,14 +628,10 @@ SlruPhysicalReadPage(SlruCtl ctl, int pageno, int slotno)
 		return false;
 	}
 #ifdef XP_TRACE_LRU_READ
-	else
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\tREAD:\tSlruPhysicalReadPage:\tfile:%s",
-					tv.tv_sec, tv.tv_usec, path)));
-	}
+	gettimeofday(&tv, NULL);
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tREAD:\tSlruPhysicalReadPage:\tfile:%s",
+				tv.tv_sec, tv.tv_usec, path)));
 #endif
 
 	if (close(fd))
@@ -670,6 +667,7 @@ SlruPhysicalWritePage(SlruCtl ctl, int pageno, int slotno, SlruFlush fdata)
 	int			offset = rpageno * BLCKSZ;
 	char		path[MAXPGPATH];
 	int			fd = -1;
+	struct timeval tv;
 
 	/*
 	 * Honor the write-WAL-before-data rule, if appropriate, so that we do not
@@ -800,14 +798,10 @@ SlruPhysicalWritePage(SlruCtl ctl, int pageno, int slotno, SlruFlush fdata)
 		return false;
 	}
 #ifdef XP_TRACE_LRU_WRITE
-	else
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\tWRITE:\tSlruPhysicalWritePage:\tfile:%s",
-					tv.tv_sec, tv.tv_usec, path)));
-	}
+	gettimeofday(&tv, NULL);
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tWRITE:\tSlruPhysicalWritePage:\tfile:%s",
+				tv.tv_sec, tv.tv_usec, path)));
 #endif
 
 	/*

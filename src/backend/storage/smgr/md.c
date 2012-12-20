@@ -469,6 +469,7 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	off_t		seekpos;
 	int			nbytes;
 	MdfdVec    *v;
+	struct timeval tv;
 
 	/* This assert is too expensive to have on normally ... */
 #ifdef CHECK_WRITE_VS_EXTEND
@@ -525,14 +526,10 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errhint("Check free disk space.")));
 	}
 #ifdef XP_TRACE_MD_WRITE
-	else
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\tWRITE:mdextend:\tfile:%s\tforknum:%u\tblocknum:%u",
-					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
-	}
+	gettimeofday(&tv, NULL);
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tWRITE:mdextend:\tfile:%s\tforknum:%u\tblocknum:%u",
+				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
 #endif
 
 	if (!skipFsync && !SmgrIsTemp(reln))
@@ -660,6 +657,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	off_t		seekpos;
 	int			nbytes;
 	MdfdVec    *v;
+	struct timeval tv;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -715,14 +713,10 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							nbytes, BLCKSZ)));
 	}
 #ifdef XP_TRACE_MD_READ
-	else
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\tREAD:mdread:\tfile:%s\tforknum:%u\tblocknum:%u",
-					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
-	}
+	gettimeofday(&tv, NULL);
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tREAD:mdread:\tfile:%s\tforknum:%u\tblocknum:%u",
+				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
 #endif
 }
 
@@ -740,7 +734,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	off_t		seekpos;
 	int			nbytes;
 	MdfdVec    *v;
-
+	struct timeval tv;
 	/* This assert is too expensive to have on normally ... */
 #ifdef CHECK_WRITE_VS_EXTEND
 	Assert(blocknum < mdnblocks(reln, forknum));
@@ -791,14 +785,11 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errhint("Check free disk space.")));
 	}
 #ifdef XP_TRACE_MD_WRITE
-	else
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\tWRITE:mdwrite:\tfile:%s\tforknum:%u\tblocknum:%u",
-					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
-	}
+
+	gettimeofday(&tv, NULL);
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tWRITE:mdwrite:\tfile:%s\tforknum:%u\tblocknum:%u",
+				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
 #endif
 
 	if (!skipFsync && !SmgrIsTemp(reln))
