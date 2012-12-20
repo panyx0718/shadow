@@ -632,7 +632,7 @@ SlruPhysicalReadPage(SlruCtl ctl, int pageno, int slotno)
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\t READ:\t SlruPhysicalReadPage:\t file:%s\t ",
+			(errmsg("%ld.%ld:\tREAD:\tSlruPhysicalReadPage:\tfile:%s",
 					tv.tv_sec, tv.tv_usec, path)));
 	}
 #endif
@@ -799,15 +799,15 @@ SlruPhysicalWritePage(SlruCtl ctl, int pageno, int slotno, SlruFlush fdata)
 			close(fd);
 		return false;
 	}
-
 #ifdef XP_TRACE_LRU_WRITE
-	struct stat my_stat;
-	struct timeval tv;
-	gettimeofday(&tv);
-	fstat(fd, &my_stat);
-	ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\tSlruPhysicalWritePage: %d: %d",
-					tv.tv_sec, tv.tv_usec, my_stat.st_ino, pageno)));
+	else
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		ereport(TRACE_LEVEL,
+			(errmsg("%ld.%ld:\tWRITE:\tSlruPhysicalWritePage:\tfile:%s",
+					tv.tv_sec, tv.tv_usec, path)));
+	}
 #endif
 
 	/*

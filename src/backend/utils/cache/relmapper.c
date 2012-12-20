@@ -613,7 +613,7 @@ load_relmap_file(bool shared)
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\t READ:\t load_relmap_file:\t file:%s\t ",
+			(errmsg("%ld.%ld:\tREAD:\tload_relmap_file:\tfile:%s",
 					tv.tv_sec, tv.tv_usec, mapfilename)));
 	}
 #endif
@@ -755,7 +755,7 @@ write_relmap_file(bool shared, RelMapFile *newmap,
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\t WRITE:\t write_relmap_file:\t file:%s\t ",
+			(errmsg("%ld.%ld:\tWRITE:\twrite_relmap_file:\tfile:%s",
 					tv.tv_sec, tv.tv_usec, mapfilename)));
 	}
 #endif

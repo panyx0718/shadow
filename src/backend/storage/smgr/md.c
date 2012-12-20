@@ -530,7 +530,7 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\t WRITE: mdextend:\t file:%s\t forknum:%u\t blocknum:%u\t ",
+			(errmsg("%ld.%ld:\tWRITE:mdextend:\tfile:%s\tforknum:%u\tblocknum:%u",
 					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
 	}
 #endif
@@ -720,7 +720,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\t READ:\t mdread:\t file:%s\t forknum:%u\t blocknum:%u\t ",
+			(errmsg("%ld.%ld:\tREAD:mdread:\tfile:%s\tforknum:%u\tblocknum:%u",
 					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
 	}
 #endif
@@ -796,7 +796,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		ereport(TRACE_LEVEL,
-			(errmsg("%ld.%ld:\t WRITE:\t mdwrite:\t file:%s\t forknum:%u\t blocknum:%u\t ",
+			(errmsg("%ld.%ld:\tWRITE:mdwrite:\tfile:%s\tforknum:%u\tblocknum:%u",
 					tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
 	}
 #endif
