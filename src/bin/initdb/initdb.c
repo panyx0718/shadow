@@ -2658,7 +2658,12 @@ main(int argc, char *argv[])
 		"base",
 		"base/1",
 		"pg_tblspc",
-		"pg_stat_tmp"
+		"pg_stat_tmp",
+		/*xp. add tmp dir*/
+		"pg_tmp",
+		"pg_tmp/base",
+		"pg_tmp/base/1",
+		"pg_tmp/global"
 	};
 
 	progname = get_progname(argv[0]);

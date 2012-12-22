@@ -128,7 +128,8 @@ relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 		pathlen = 7 + OIDCHARS + 1 + FORKNAMECHARS + 1;
 		path = (char *) palloc(pathlen);
 		if (forknum != MAIN_FORKNUM)
-			snprintf(path, pathlen, "global/%u_%s",
+			snprintf(path, pathlen, "%s/global/%u_%s",
+					 "pg_tmp",
 					 rnode.relNode, forkNames[forknum]);
 		else
 			snprintf(path, pathlen, "global/%u", rnode.relNode);
@@ -141,7 +142,8 @@ relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 			pathlen = 5 + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
 			path = (char *) palloc(pathlen);
 			if (forknum != MAIN_FORKNUM)
-				snprintf(path, pathlen, "base/%u/%u_%s",
+				snprintf(path, pathlen, "%s/base/%u/%u_%s",
+						 "pg_tmp",
 						 rnode.dbNode, rnode.relNode,
 						 forkNames[forknum]);
 			else
@@ -155,7 +157,8 @@ relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 				+ FORKNAMECHARS + 1;
 			path = (char *) palloc(pathlen);
 			if (forknum != MAIN_FORKNUM)
-				snprintf(path, pathlen, "base/%u/t%d_%u_%s",
+				snprintf(path, pathlen, "%s/base/%u/t%d_%u_%s",
+						 "pg_tmp",
 						 rnode.dbNode, backend, rnode.relNode,
 						 forkNames[forknum]);
 			else

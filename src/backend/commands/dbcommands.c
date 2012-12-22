@@ -586,6 +586,16 @@ createdb(const CreatedbStmt *stmt)
 			 */
 			copydir(srcpath, dstpath, false);
 
+			char tmpsrcdir[MAXPGPATH];
+			char tmpdstdir[MAXPGPATH];
+			snprintf(tmpsrcdir, MAXPGPATH, "%s%s", "pg_tmp/", srcpath);
+			snprintf(tmpdstdir, MAXPGPATH, "%s%s", "pg_tmp/", dstpath);
+			copydir(tmpsrcdir, tmpdstdir, false);
+
+			ereport(TRACE_LEVEL,
+				(errmsg("mkdir srcpath:%s\tdstpath:%s\tsrctmpdir:%s\tsrctmpdir:%s",
+						srcpath, dstpath, tmpsrcdir, tmpdstdir)));
+
 			/* Record the filesystem change in XLOG */
 			{
 				xl_dbase_create_rec xlrec;

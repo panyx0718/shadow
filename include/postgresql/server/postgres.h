@@ -692,10 +692,10 @@ extern void ExceptionalCondition(const char *conditionName,
  */
 
 #define TRACE_LEVEL WARNING
-#define STRACK_TRACE
+#define TRACE_STACK
 #define TRACE_SIZE 5
 
-#define TRACE_RW
+//#define TRACE_RW
 #ifdef TRACE_RW
 /*
  * magnetic read/write functions.
