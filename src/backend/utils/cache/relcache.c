@@ -3938,10 +3938,10 @@ load_relcache_init_file(bool shared)
 	int			i;
 
 	if (shared)
-		snprintf(initfilename, sizeof(initfilename), "global/%s",
+		snprintf(initfilename, sizeof(initfilename), "pg_tmp/global/%s",
 				 RELCACHE_INIT_FILENAME);
 	else
-		snprintf(initfilename, sizeof(initfilename), "%s/%s",
+		snprintf(initfilename, sizeof(initfilename), "pg_tmp/%s/%s",
 				 DatabasePath, RELCACHE_INIT_FILENAME);
 
 	fp = AllocateFile(initfilename, PG_BINARY_R);
@@ -4296,16 +4296,16 @@ write_relcache_init_file(bool shared)
 	 */
 	if (shared)
 	{
-		snprintf(tempfilename, sizeof(tempfilename), "global/%s.%d",
+		snprintf(tempfilename, sizeof(tempfilename), "pg_tmp/global/%s.%d",
 				 RELCACHE_INIT_FILENAME, MyProcPid);
-		snprintf(finalfilename, sizeof(finalfilename), "global/%s",
+		snprintf(finalfilename, sizeof(finalfilename), "pg_tmp/global/%s",
 				 RELCACHE_INIT_FILENAME);
 	}
 	else
 	{
-		snprintf(tempfilename, sizeof(tempfilename), "%s/%s.%d",
+		snprintf(tempfilename, sizeof(tempfilename), "pg_tmp/%s/%s.%d",
 				 DatabasePath, RELCACHE_INIT_FILENAME, MyProcPid);
-		snprintf(finalfilename, sizeof(finalfilename), "%s/%s",
+		snprintf(finalfilename, sizeof(finalfilename), "pg_tmp/%s/%s",
 				 DatabasePath, RELCACHE_INIT_FILENAME);
 	}
 
@@ -4520,7 +4520,7 @@ RelationCacheInitFilePreInvalidate(void)
 {
 	char		initfilename[MAXPGPATH];
 
-	snprintf(initfilename, sizeof(initfilename), "%s/%s",
+	snprintf(initfilename, sizeof(initfilename), "pg_tmp/%s/%s",
 			 DatabasePath, RELCACHE_INIT_FILENAME);
 
 	LWLockAcquire(RelCacheInitLock, LW_EXCLUSIVE);
@@ -4568,7 +4568,7 @@ RelationCacheInitFileRemove(void)
 	 * We zap the shared cache file too.  In theory it can't get out of sync
 	 * enough to be a problem, but in data-corruption cases, who knows ...
 	 */
-	snprintf(path, sizeof(path), "global/%s",
+	snprintf(path, sizeof(path), "pg_tmp/global/%s",
 			 RELCACHE_INIT_FILENAME);
 	unlink_initfile(path);
 
@@ -4620,7 +4620,7 @@ RelationCacheInitFileRemoveInDir(const char *tblspcpath)
 		if (strspn(de->d_name, "0123456789") == strlen(de->d_name))
 		{
 			/* Try to remove the init file in each database */
-			snprintf(initfilename, sizeof(initfilename), "%s/%s/%s",
+			snprintf(initfilename, sizeof(initfilename), "pg_tmp/%s/%s/%s",
 					 tblspcpath, de->d_name, RELCACHE_INIT_FILENAME);
 			unlink_initfile(initfilename);
 		}
