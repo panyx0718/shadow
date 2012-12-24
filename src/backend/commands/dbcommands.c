@@ -1013,6 +1013,8 @@ movedb(const char *dbname, const char *tblspcname)
 	DIR		   *dstdir;
 	struct dirent *xlde;
 	movedb_failure_params fparms;
+	char tmpsrc_dbpath[MAXPGPATH];
+	char tmpdst_dbpath[MAXPGPATH];
 
 	/*
 	 * Look up the target database's OID, and get exclusive lock on it. We
@@ -1148,6 +1150,11 @@ movedb(const char *dbname, const char *tblspcname)
 		if (rmdir(dst_dbpath) != 0)
 			elog(ERROR, "could not remove directory \"%s\": %m",
 				 dst_dbpath);
+
+		snprintf(tmpdst_dbpath, MAXPGPATH, "%s%s", "pg_tmp/", dst_dbpath);
+		if (rmdir(tmpdst_dbpath) != 0)
+			elog(ERROR, "could not remove directory \"%s\": %m",
+				 tmpdst_dbpath);
 	}
 
 	/*
@@ -1165,6 +1172,10 @@ movedb(const char *dbname, const char *tblspcname)
 		 * Copy files from the old tablespace to the new one
 		 */
 		copydir(src_dbpath, dst_dbpath, false);
+
+		snprintf(tmpsrc_dbpath, MAXPGPATH, "%s%s", "pg_tmp/", src_dbpath);
+		snprintf(tmpdst_dbpath, MAXPGPATH, "%s%s", "pg_tmp/", dst_dbpath);
+		copydir(tmpsrc_dbpath, tmpdst_dbpath, false);
 
 		/*
 		 * Record the filesystem change in XLOG
@@ -1296,11 +1307,14 @@ movedb_failure_callback(int code, Datum arg)
 {
 	movedb_failure_params *fparms = (movedb_failure_params *) DatumGetPointer(arg);
 	char	   *dstpath;
+	char		tmpdstpath[MAXPGPATH];
 
 	/* Get rid of anything we managed to copy to the target directory */
 	dstpath = GetDatabasePath(fparms->dest_dboid, fparms->dest_tsoid);
 
 	(void) rmtree(dstpath, true);
+	snprintf(tmpdstpath, MAXPGPATH, "%s%s", "pg_tmp/", dstpath);
+	(void) rmtree(tmpdstpath, true);
 }
 
 
@@ -1708,6 +1722,7 @@ remove_dbtablespaces(Oid db_id)
 	Relation	rel;
 	HeapScanDesc scan;
 	HeapTuple	tuple;
+	char tmpdstpath[MAXPGPATH];
 
 	rel = heap_open(TableSpaceRelationId, AccessShareLock);
 	scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
@@ -1734,6 +1749,13 @@ remove_dbtablespaces(Oid db_id)
 			ereport(WARNING,
 					(errmsg("some useless files may be left behind in old database directory \"%s\"",
 							dstpath)));
+
+		/* also remove the dir in pg_tmp */
+		snprintf(tmpdstpath, MAXPGPATH, "%s%s", "pg_tmp/", dstpath);
+		if (!rmtree(tmpdstpath, true))
+			ereport(WARNING,
+					(errmsg("some useless files may be left behind in old database directory \"%s\"",
+							tmpdstpath)));
 
 		/* Record the filesystem change in XLOG */
 		{
@@ -1910,6 +1932,8 @@ void
 dbase_redo(XLogRecPtr lsn, XLogRecord *record)
 {
 	uint8		info = record->xl_info & ~XLR_INFO_MASK;
+	char		tmpsrc_path[MAXPGPATH];
+	char		tmpdst_path[MAXPGPATH];
 
 	/* Backup blocks are not used in dbase records */
 	Assert(!(record->xl_info & XLR_BKP_BLOCK_MASK));
@@ -1919,6 +1943,7 @@ dbase_redo(XLogRecPtr lsn, XLogRecord *record)
 		xl_dbase_create_rec *xlrec = (xl_dbase_create_rec *) XLogRecGetData(record);
 		char	   *src_path;
 		char	   *dst_path;
+
 		struct stat st;
 
 		src_path = GetDatabasePath(xlrec->src_db_id, xlrec->src_tablespace_id);
@@ -1950,6 +1975,9 @@ dbase_redo(XLogRecPtr lsn, XLogRecord *record)
 		 * We don't need to copy subdirectories
 		 */
 		copydir(src_path, dst_path, false);
+		snprintf(tmpsrc_path, MAXPGPATH, "%s%s", "pg_tmp/", src_path);
+		snprintf(tmpdst_path, MAXPGPATH, "%s%s", "pg_tmp/", dst_path);
+		copydir(tmpsrc_path, tmpdst_path, false);
 	}
 	else if (info == XLOG_DBASE_DROP)
 	{
@@ -1984,6 +2012,12 @@ dbase_redo(XLogRecPtr lsn, XLogRecord *record)
 			ereport(WARNING,
 					(errmsg("some useless files may be left behind in old database directory \"%s\"",
 							dst_path)));
+		/* drop the corresponding pg_tmp dir */
+		snprintf(tmpdst_path, MAXPGPATH, "%s%s", "pg_tmp/", dst_path);
+		if (!rmtree(dst_path, true))
+			ereport(WARNING,
+					(errmsg("some useless files may be left behind in old database directory \"%s\"",
+							tmpdst_path)));
 
 		if (InHotStandby)
 		{
