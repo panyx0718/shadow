@@ -622,7 +622,7 @@ sendDir(char *path, int basepathlen, bool sizeonly)
 			continue;
 
 		/* Skip pg_control here to back up it last */
-		if (strcmp(pathbuf, "./global/pg_control") == 0)
+		if (strcmp(pathbuf, "./pg_tmp/global/pg_control") == 0)
 			continue;
 
 		if (lstat(pathbuf, &statbuf) != 0)

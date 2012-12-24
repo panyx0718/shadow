@@ -1263,7 +1263,7 @@ checkDataDir(void)
 	/* Look for PG_VERSION before looking for pg_control */
 	ValidatePgVersion(DataDir);
 
-	snprintf(path, sizeof(path), "%s/global/pg_control", DataDir);
+	snprintf(path, sizeof(path), "%s/pg_tmp/global/pg_control", DataDir);
 
 	fp = AllocateFile(path, PG_BINARY_R);
 	if (fp == NULL)

@@ -125,7 +125,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	snprintf(ControlFilePath, MAXPGPATH, "%s/global/pg_control", DataDir);
+	snprintf(ControlFilePath, MAXPGPATH, "%s/pg_tmp/global/pg_control", DataDir);
 
 	if ((fd = open(ControlFilePath, O_RDONLY | PG_BINARY, 0)) == -1)
 	{
