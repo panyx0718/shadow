@@ -58,7 +58,7 @@
 #include "storage/ipc.h"
 #include "utils/guc.h"
 #include "utils/resowner.h"
-
+#include "replication/walsender.h"
 
 /*
  * We must leave some file descriptors free for system(), the dynamic loader,
@@ -104,7 +104,6 @@ int			max_files_per_process = 1000;
  * setting this variable, and so need not be tested separately.
  */
 int			max_safe_fds = 32;	/* default if not changed */
-
 
 /* Debugging.... */
 
@@ -1222,7 +1221,7 @@ int
 FileWrite(File file, char *buffer, int amount)
 {
 	int			returnCode;
-
+	char*		filename;
 	Assert(FileIsValid(file));
 
 	DO_DB(elog(LOG, "FileWrite: %d (%s) " INT64_FORMAT " %d %p",
@@ -1259,9 +1258,33 @@ FileWrite(File file, char *buffer, int amount)
 		}
 	}
 
+	if(!high_avail_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+	}
+
+	filename = FilePathName(file);
+	if(high_avail_mode &&
+	   strstr(filename, "pg_tmp") == NULL &&
+			(strstr(filename, "base/") != NULL||
+			 strstr(filename, "global/") != NULL
+			))
+	{
+		returnCode = amount;
+		ereport(TRACE_LEVEL,
+			(errmsg("blockwrite:%s", filename)));
+	}
+	else
+	{
 retry:
-	errno = 0;
-	returnCode = write(VfdCache[file].fd, buffer, amount);
+		errno = 0;
+		returnCode = write(VfdCache[file].fd, buffer, amount);
+
+		ereport(TRACE_LEVEL,
+			(errmsg("nonblockwrite:%s\thigh_avail_mode:%c", filename, high_avail_mode+'0')));
+	}
+
 
 	/* if write didn't set errno, assume problem is no disk space */
 	if (returnCode != amount && errno == 0)
@@ -1414,6 +1437,7 @@ int
 FileTruncate(File file, off_t offset)
 {
 	int			returnCode;
+	char		*filename;
 
 	Assert(FileIsValid(file));
 
@@ -1424,7 +1448,34 @@ FileTruncate(File file, off_t offset)
 	if (returnCode < 0)
 		return returnCode;
 
-	returnCode = ftruncate(VfdCache[file].fd, offset);
+	if(!high_avail_mode)
+	{
+		int fd = BasicOpenFile("pg_tmp/high_avail_mode", O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
+		if(fd >= 0)
+		{
+			high_avail_mode = true;
+			close(fd);
+		}
+	}
+
+	filename = FilePathName(file);
+	if(high_avail_mode &&
+	   strstr(filename, "pg_tmp") == NULL &&
+			(strstr(filename, "base/") != NULL ||
+			 strstr(filename, "global/") != NULL
+			))
+	{
+		returnCode = 0;
+		ereport(TRACE_LEVEL,
+			(errmsg("blocktruncation:%s", filename)));
+	}
+	else
+	{
+		returnCode = ftruncate(VfdCache[file].fd, offset);
+		ereport(TRACE_LEVEL,
+			(errmsg("nonblocktruncation:%s, high_avail_mode:%c", filename, high_avail_mode+'0')));
+	}
+
 
 	if (returnCode == 0 && VfdCache[file].fileSize > offset)
 	{

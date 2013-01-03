@@ -58,6 +58,17 @@ report_invalid_page(int elevel, RelFileNode node, ForkNumber forkno,
 					BlockNumber blkno, bool present)
 {
 	char	   *path = relpathperm(node, forkno);
+	struct timeval	tv;
+
+#ifdef XP_TRACE_MD_WRITE
+	gettimeofday(&tv, NULL);
+#ifdef TRACE_STACK
+	xp_stack_trace(TRACE_SIZE, tv);
+#endif
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\treport_invalid_page",
+				tv.tv_sec, tv.tv_usec)));
+#endif
 
 	if (present)
 		elog(elevel, "page %u of relation %s is uninitialized",

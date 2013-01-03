@@ -5592,6 +5592,7 @@ readRecoveryCommandFile(void)
 								"standby_mode")));
 			ereport(DEBUG2,
 					(errmsg_internal("standby_mode = '%s'", item->value)));
+			standby_mode = StandbyMode;
 		}
 		else if (strcmp(item->name, "primary_conninfo") == 0)
 		{

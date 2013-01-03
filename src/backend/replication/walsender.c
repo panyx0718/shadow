@@ -80,7 +80,10 @@ bool		am_cascading_walsender = false;		/* Am I cascading WAL to
 /* User-settable parameters for walsender */
 int			max_wal_senders = 0;	/* the maximum number of concurrent walsenders */
 int			replication_timeout = 60 * 1000;	/* maximum time to send one
+
 												 * WAL data message */
+bool high_avail_mode = false;
+bool standby_mode = false;
 
 /*
  * These variables are used similarly to openLogFile/Id/Seg/Off,
@@ -133,6 +136,8 @@ static void ProcessStandbyReplyMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
 static void ProcessRepliesIfAny(void);
 static void WalSndKeepalive(char *msgbuf);
+
+
 
 
 /* Main entry point for walsender process */
@@ -713,7 +718,7 @@ WalSndLoop(void)
 {
 	char	   *output_message;
 	bool		caughtup = false;
-
+	struct	timeval	tv;
 	/*
 	 * Allocate buffer that will be used for each output message.  We do this
 	 * just once to reduce palloc overhead.  The buffer must be made large
@@ -729,6 +734,27 @@ WalSndLoop(void)
 
 	/* Initialize the last reply timestamp */
 	last_reply_timestamp = GetCurrentTimestamp();
+
+
+	/*xp. start high avail mode */
+	gettimeofday(&tv, NULL);
+
+	if(standby_mode != true)
+	{
+		int fd = BasicOpenFile("pg_tmp/high_avail_mode",
+							   O_WRONLY | O_CREAT | PG_BINARY,
+							   S_IRUSR | S_IWUSR);
+		close(fd);
+		high_avail_mode = true;
+	}
+
+	ereport(LOG,
+				(errmsg("%ld:%ld\tstandby_mode:%c\thigh_avail_mode=%c",
+						tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0')));
+	xp_stack_trace(TRACE_SIZE, tv);
+	ereport(LOG,
+				(errmsg("%ld:%ld\tStart high availability mode", tv.tv_sec, tv.tv_usec)));
+
 
 	/* Loop forever, unless we get an error */
 	for (;;)
@@ -754,6 +780,9 @@ WalSndLoop(void)
 		/* Normal exit from the walsender is here */
 		if (walsender_shutdown_requested)
 		{
+			/*xp. start high avail mode */
+
+
 			/* Inform the standby that XLOG streaming is done */
 			pq_puttextmessage('C', "COPY 0");
 			pq_flush();
@@ -873,7 +902,6 @@ WalSndLoop(void)
 			}
 		}
 	}
-
 	/*
 	 * Get here on send failure.  Clean up and exit.
 	 *

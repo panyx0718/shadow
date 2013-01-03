@@ -58,7 +58,6 @@ extern int	max_files_per_process;
  */
 extern int	max_safe_fds;
 
-
 /*
  * prototypes for functions in fd.c
  */
