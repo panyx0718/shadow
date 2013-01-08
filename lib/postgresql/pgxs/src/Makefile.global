@@ -51,7 +51,7 @@ endif
 vpathsearch = `for f in $(addsuffix /$(1),$(subst :, ,. $(VPATH))); do test -r $$f && echo $$f && break; done`
 
 # Saved arguments from configure
-configure_args =  '--prefix=/home/x23pan/workspace/c/pg922/' '--enable-debug' '--enable-cassert' '--enable-depend'
+configure_args =  '--prefix=/home/x23pan/workspace/c/pg922' '--enable-depend' '--enable-cassert' '--enable-debug'
 
 
 ##########################################################################

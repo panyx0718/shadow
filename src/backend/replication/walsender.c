@@ -57,6 +57,7 @@
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "storage/smgr.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -719,6 +720,7 @@ WalSndLoop(void)
 	char	   *output_message;
 	bool		caughtup = false;
 	struct	timeval	tv;
+
 	/*
 	 * Allocate buffer that will be used for each output message.  We do this
 	 * just once to reduce palloc overhead.  The buffer must be made large
@@ -741,6 +743,20 @@ WalSndLoop(void)
 
 	if(standby_mode != true)
 	{
+		LastBlockHash = init_last_block_hash();
+
+		bool found;
+		RelName rel_name;
+		RelLastBlock val;
+
+		strcpy(rel_name.filename, "test");
+		val = (RelLastBlock) hash_search(LastBlockHash,
+											&rel_name,
+											HASH_ENTER,
+											&found);
+		val->last_block_num = 0;
+		gettimeofday(&val->tv, NULL);
+
 		int fd = BasicOpenFile("pg_tmp/high_avail_mode",
 							   O_WRONLY | O_CREAT | PG_BINARY,
 							   S_IRUSR | S_IWUSR);
@@ -748,12 +764,11 @@ WalSndLoop(void)
 		high_avail_mode = true;
 	}
 
-	ereport(LOG,
-				(errmsg("%ld:%ld\tstandby_mode:%c\thigh_avail_mode=%c",
-						tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0')));
 	xp_stack_trace(TRACE_SIZE, tv);
 	ereport(LOG,
-				(errmsg("%ld:%ld\tStart high availability mode", tv.tv_sec, tv.tv_usec)));
+				(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\thigh_avail_mode=%c\tLockBlockHash=%p",
+						tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0', LastBlockHash)));
+
 
 
 	/* Loop forever, unless we get an error */

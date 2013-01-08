@@ -30,7 +30,7 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "pg_trace.h"
-
+#include "replication/walsender.h"
 
 /* intervals for calling AbsorbFsyncRequests in mdsync and mdpostckpt */
 #define FSYNCS_PER_ABSORB		10
@@ -525,6 +525,13 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						nbytes, BLCKSZ, blocknum),
 				 errhint("Check free disk space.")));
 	}
+	if(high_avail_mode)
+	{
+		modify_last_block_hash(FilePathName(v->mdfd_vfd),
+								blocknum % ((BlockNumber) RELSEG_SIZE) + 1,
+								HASH_ENTER_NULL);
+	}
+
 #ifdef XP_TRACE_MD_WRITE
 	gettimeofday(&tv, NULL);
 #ifdef TRACE_STACK
@@ -537,6 +544,8 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 
 	if (!skipFsync && !SmgrIsTemp(reln))
 		register_dirty_segment(reln, forknum, v);
+
+
 
 	Assert(_mdnblocks(reln, forknum, v) <= ((BlockNumber) RELSEG_SIZE));
 }
@@ -918,6 +927,12 @@ mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 						(errcode_for_file_access(),
 						 errmsg("could not truncate file \"%s\": %m",
 								FilePathName(v->mdfd_vfd))));
+			if(high_avail_mode)
+			{
+				modify_last_block_hash(FilePathName(v->mdfd_vfd),
+										(BlockNumber)0,
+										HASH_ENTER_NULL);
+			}
 
 			if (!SmgrIsTemp(reln))
 				register_dirty_segment(reln, forknum, v);
@@ -944,6 +959,13 @@ mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 					errmsg("could not truncate file \"%s\" to %u blocks: %m",
 						   FilePathName(v->mdfd_vfd),
 						   nblocks)));
+			if(high_avail_mode)
+			{
+				modify_last_block_hash(FilePathName(v->mdfd_vfd),
+										(BlockNumber)lastsegblocks,
+										HASH_ENTER_NULL);
+			}
+
 			if (!SmgrIsTemp(reln))
 				register_dirty_segment(reln, forknum, v);
 			v = v->mdfd_chain;
@@ -1799,12 +1821,40 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 {
 	off_t		len;
 
+	if(high_avail_mode && LastBlockHash != NULL)
+	{
+		BlockNumber blocknum = get_last_block_hash(FilePathName(seg->mdfd_vfd), HASH_FIND);
+
+		if(blocknum != InvalidBlockNumber)
+		{
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			ereport(TRACE_LEVEL,
+					(errmsg("%ld.%ld:\tREAD:_mdnblocks:\tfile:%s\tforknum:%u\tcacheblocknum:%d",
+							tv.tv_sec, tv.tv_usec, FilePathName(seg->mdfd_vfd), forknum, blocknum)));
+			return blocknum;
+		}
+	}
+
 	len = FileSeek(seg->mdfd_vfd, 0L, SEEK_END);
 	if (len < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not seek to end of file \"%s\": %m",
 						FilePathName(seg->mdfd_vfd))));
+
+
+/*
+#ifdef XP_TRACE_MD_WRITE
+	gettimeofday(&tv, NULL);
+#ifdef TRACE_STACK
+	xp_stack_trace(TRACE_SIZE, tv);
+#endif
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tREAD:_mdnblocks:\tfile:%s\tforknum:%u\tblocknum:%d",
+				tv.tv_sec, tv.tv_usec, FilePathName(seg->mdfd_vfd), forknum, len/BLCKSZ)));
+#endif
+*/
 	/* note that this calculation will ignore any partial block at EOF */
 	return (BlockNumber) (len / BLCKSZ);
 }

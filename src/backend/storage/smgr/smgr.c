@@ -23,7 +23,7 @@
 #include "storage/smgr.h"
 #include "utils/hsearch.h"
 #include "utils/inval.h"
-
+#include "replication/walsender.h"
 
 /*
  * This struct of function pointers defines the API between smgr.c and
@@ -79,8 +79,10 @@ static const int NSmgr = lengthof(smgrsw);
  * In addition, "unowned" SMgrRelation objects are chained together in a list.
  */
 static HTAB *SMgrRelationHash = NULL;
-
+HTAB *LastBlockHash = NULL;
 static SMgrRelation first_unowned_reln = NULL;
+
+
 
 /* local function prototypes */
 static void smgrshutdown(int code, Datum arg);
@@ -484,6 +486,7 @@ void
 smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		   char *buffer, bool skipFsync)
 {
+
 	(*(smgrsw[reln->smgr_which].smgr_extend)) (reln, forknum, blocknum,
 											   buffer, skipFsync);
 }
@@ -677,4 +680,85 @@ AtEOXact_SMgr(void)
 		Assert(first_unowned_reln->smgr_owner == NULL);
 		smgrclose(first_unowned_reln);
 	}
+}
+
+
+HTAB*
+init_last_block_hash()
+{
+	HTAB* LastBlockHash = NULL;
+	HASHCTL info;
+	int hash_flags;
+	long init_table_size = 100;
+	long max_table_size = 100;
+
+
+	MemSet(&info, 0, sizeof(info));
+	info.keysize = sizeof(RelName);
+	info.entrysize = sizeof(RelLastBlockData);
+	hash_flags = HASH_ELEM;
+
+	LastBlockHash =  ShmemInitHash("relation last block",
+								init_table_size,
+								max_table_size,
+								&info,
+								hash_flags);
+
+	return LastBlockHash;
+}
+
+void
+modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action)
+{
+	bool found;
+	RelName rel_name;
+	RelLastBlock val;
+	struct timeval tv;
+
+	if(strstr(filename, "pg_tmp") != NULL ||
+			(strstr(filename, "base/") == NULL &&
+			 strstr(filename, "global/") == NULL))
+		return;
+
+	if(LastBlockHash == NULL)
+	{
+		LastBlockHash = init_last_block_hash();
+		ereport(TRACE_LEVEL,
+				(errmsg("LastBlockHash:%p", LastBlockHash)));
+	}
+
+	strcpy(rel_name.filename, filename);
+	val = (RelLastBlock) hash_search(LastBlockHash,
+									&rel_name,
+									action,
+									&found);
+	if(val != NULL)
+	{
+		val->last_block_num = blocknum;
+		gettimeofday(&val->tv, NULL);
+	}
+	else
+		ereport(ERROR,
+			(errmsg("%ld.%ld:\tOutofMemory for last block hash",
+					tv.tv_sec, tv.tv_usec)));
+}
+
+BlockNumber
+get_last_block_hash(char *filename, HASHACTION action)
+{
+	bool found;
+	RelName rel_name;
+	RelLastBlock val;
+	struct timeval tv;
+
+	strcpy(rel_name.filename, filename);
+	val = (RelLastBlock) hash_search(LastBlockHash,
+										&rel_name,
+										action,
+										&found);
+
+	if(val != NULL)
+		return val->last_block_num;
+	else
+		return InvalidBlockNumber;
 }

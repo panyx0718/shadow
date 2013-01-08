@@ -15,6 +15,7 @@
 #include <signal.h>
 
 #include "fmgr.h"
+#include "utils/hsearch.h"
 
 /* global state */
 extern bool am_walsender;

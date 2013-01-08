@@ -300,7 +300,14 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 	ResourceOwnerEnlargeBuffers(CurrentResourceOwner);
 
 	isExtend = (blockNum == P_NEW);
-
+	//xp. debug point
+/* debug here is too expensive
+ * struct timeval tv;
+	gettimeofday(&tv, NULL);
+	ereport(TRACE_LEVEL,
+		(errmsg("%ld.%ld:\tdebug_poing:isExtend:%c\tisLocalBuf:%c",
+				tv.tv_sec, tv.tv_usec, isExtend+'0', isLocalBuf+'0')));
+*/
 	TRACE_POSTGRESQL_BUFFER_READ_START(forkNum, blockNum,
 									   smgr->smgr_rnode.node.spcNode,
 									   smgr->smgr_rnode.node.dbNode,
@@ -374,10 +381,17 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		 */
 		bufBlock = isLocalBuf ? LocalBufHdrGetBlock(bufHdr) : BufHdrGetBlock(bufHdr);
 		if (!PageIsNew((Page) bufBlock))
+		{
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			xp_stack_trace(TRACE_SIZE, tv);
+
 			ereport(ERROR,
 			 (errmsg("unexpected data beyond EOF in block %u of relation %s",
 					 blockNum, relpath(smgr->smgr_rnode, forkNum)),
 			  errhint("This has been seen to occur with buggy kernels; consider updating your system.")));
+		}
+
 
 		/*
 		 * We *must* do smgrextend before succeeding, else the page will not

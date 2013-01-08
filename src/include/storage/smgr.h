@@ -14,6 +14,7 @@
 #ifndef SMGR_H
 #define SMGR_H
 
+#include "utils/hsearch.h"
 #include "fmgr.h"
 #include "storage/block.h"
 #include "storage/relfilenode.h"
@@ -76,6 +77,25 @@ typedef SMgrRelationData *SMgrRelation;
 #define SmgrIsTemp(smgr) \
 	RelFileNodeBackendIsTemp((smgr)->smgr_rnode)
 
+
+
+typedef struct RelName
+{
+	char filename[128];
+}RelName;
+
+typedef struct RelLastBlock
+{
+	RelName rel_name;
+	BlockNumber last_block_num;
+	struct timeval tv;
+}RelLastBlockData;
+
+typedef RelLastBlockData *RelLastBlock;
+
+extern HTAB *LastBlockHash;
+
+
 extern void smgrinit(void);
 extern SMgrRelation smgropen(RelFileNode rnode, BackendId backend);
 extern bool smgrexists(SMgrRelation reln, ForkNumber forknum);
@@ -103,6 +123,8 @@ extern void smgrsync(void);
 extern void smgrpostckpt(void);
 extern void AtEOXact_SMgr(void);
 
+extern HTAB* init_last_block_hash();
+extern void modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action);
 
 /* internals: move me elsewhere -- ay 7/94 */
 

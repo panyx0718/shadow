@@ -1271,9 +1271,10 @@ FileWrite(File file, char *buffer, int amount)
 			 strstr(filename, "global/") != NULL
 			))
 	{
+		errno = 0;
 		returnCode = amount;
 		ereport(TRACE_LEVEL,
-			(errmsg("blockwrite:%s", filename)));
+			(errmsg("blockwrite:%s, returnsize:%d", filename, amount)));
 	}
 	else
 	{
@@ -1282,7 +1283,7 @@ retry:
 		returnCode = write(VfdCache[file].fd, buffer, amount);
 
 		ereport(TRACE_LEVEL,
-			(errmsg("nonblockwrite:%s\thigh_avail_mode:%c", filename, high_avail_mode+'0')));
+			(errmsg("nonblockwrite:%s, returnsize:%d", filename, returnCode)));
 	}
 
 
