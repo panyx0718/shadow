@@ -749,7 +749,6 @@ get_last_block_hash(char *filename, HASHACTION action)
 	bool found;
 	RelName rel_name;
 	RelLastBlock val;
-	struct timeval tv;
 
 	strcpy(rel_name.filename, filename);
 	val = (RelLastBlock) hash_search(LastBlockHash,

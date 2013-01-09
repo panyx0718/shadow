@@ -1827,11 +1827,13 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 
 		if(blocknum != InvalidBlockNumber)
 		{
+#ifdef XP_TRACE_MD_READ
 			struct timeval tv;
 			gettimeofday(&tv, NULL);
 			ereport(TRACE_LEVEL,
 					(errmsg("%ld.%ld:\tREAD:_mdnblocks:\tfile:%s\tforknum:%u\tcacheblocknum:%d",
 							tv.tv_sec, tv.tv_usec, FilePathName(seg->mdfd_vfd), forknum, blocknum)));
+#endif
 			return blocknum;
 		}
 	}

@@ -1282,8 +1282,10 @@ retry:
 		errno = 0;
 		returnCode = write(VfdCache[file].fd, buffer, amount);
 
+#ifdef XP_TRACE_MD_WRITE
 		ereport(TRACE_LEVEL,
 			(errmsg("nonblockwrite:%s, returnsize:%d", filename, returnCode)));
+#endif
 	}
 
 

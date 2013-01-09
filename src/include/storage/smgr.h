@@ -125,6 +125,7 @@ extern void AtEOXact_SMgr(void);
 
 extern HTAB* init_last_block_hash();
 extern void modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action);
+extern BlockNumber get_last_block_hash(char *filename, HASHACTION action);
 
 /* internals: move me elsewhere -- ay 7/94 */
 
