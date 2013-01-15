@@ -509,6 +509,7 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
+
 	if ((nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ)) != BLCKSZ)
 	{
 		if (nbytes < 0)
@@ -527,25 +528,32 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	}
 	if(high_avail_mode)
 	{
-		modify_last_block_hash(FilePathName(v->mdfd_vfd),
-								blocknum % ((BlockNumber) RELSEG_SIZE) + 1,
-								HASH_ENTER_NULL);
+		char *filename = FilePathName(v->mdfd_vfd);
+		if(is_tracked(filename))
+		{
+			int newblknum = blocknum % ((BlockNumber) RELSEG_SIZE) + 1;
+			modify_last_block_hash(filename, newblknum, HASH_ENTER_NULL);
+			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), NotFoundLSN, HASH_ENTER_NULL);
+			//append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
+		}
 	}
+
 
 #ifdef XP_TRACE_MD_WRITE
 	gettimeofday(&tv, NULL);
 #ifdef TRACE_STACK
 	xp_stack_trace(TRACE_SIZE, tv);
 #endif
+	XLogRecPtr ptr = PageGetLSN(buffer);
 	ereport(TRACE_LEVEL,
-		(errmsg("%ld.%ld:\tWRITE:mdextend:\tfile:%s\tforknum:%u\tblocknum:%u",
-				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
+		(errmsg("%ld.%ld:\tmode:%c.%c\tWRITE:mdextend:\tfile:%s\tforknum:%u\tblocknum:%u\tpageLSN:%u:%u\trnode:%u",
+				tv.tv_sec, tv.tv_usec, high_avail_mode+'0', standby_mode+'0',
+				FilePathName(v->mdfd_vfd), forknum, blocknum, ptr.xlogid, ptr.xrecoff,
+				reln->smgr_rnode.node.relNode)));
 #endif
 
 	if (!skipFsync && !SmgrIsTemp(reln))
 		register_dirty_segment(reln, forknum, v);
-
-
 
 	Assert(_mdnblocks(reln, forknum, v) <= ((BlockNumber) RELSEG_SIZE));
 }
@@ -670,13 +678,14 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	int			nbytes;
 	MdfdVec    *v;
 	struct timeval tv;
+	bool 	try = true;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
 										reln->smgr_rnode.node.dbNode,
 										reln->smgr_rnode.node.relNode,
 										reln->smgr_rnode.backend);
-
+retry:
 	v = _mdfd_getseg(reln, forknum, blocknum, false, EXTENSION_FAIL);
 
 	seekpos = (off_t) BLCKSZ *(blocknum % ((BlockNumber) RELSEG_SIZE));
@@ -689,7 +698,59 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	nbytes = FileRead(v->mdfd_vfd, buffer, BLCKSZ);
+
+	XLogRecPtr cur_lsn;
+	XLogRecPtr lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
+	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)) && lsn.xrecoff == 0)
+	{
+		/* new buffers are zero-filled */
+		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, NotFoundLSN, HASH_REMOVE);
+		ereport(TRACE_LEVEL,
+				(errmsg("FakeABlock:rnode:%u\tblocknum:%u",
+						reln->smgr_rnode.node.relNode, blocknum)));
+		MemSet((char *) buffer, 0, BLCKSZ);
+		nbytes = BLCKSZ;
+	}
+	else
+		nbytes = FileRead(v->mdfd_vfd, buffer, BLCKSZ);
+
+
+	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+	{
+
+		/* neither unwritten nor empty */
+		if(lsn.xrecoff != 1 && lsn.xrecoff != 0)
+		{
+			cur_lsn = PageGetLSN(buffer);
+
+			if(!XLByteEQ(cur_lsn, lsn))
+			{
+				gettimeofday(&tv, NULL);
+				ereport(TRACE_LEVEL,
+					(errmsg("WrongLSN:%ld.%ld:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
+							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
+							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
+				if(try)
+				{
+					append_block_info(reln->smgr_rnode.node, forknum, blocknum, lsn, true);
+					try = false;
+				}
+				usleep(100000);
+				goto retry;
+			}
+			else
+				update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, NotFoundLSN, HASH_REMOVE);
+		}
+		ereport(TRACE_LEVEL,
+				(errmsg("diskLSN:%u.%u\tneedLSN:%u.%u",
+						cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
+	}
+	else if(standby_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+	{
+		XLogRecPtr standby_lsn = get_standby_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
+		if(standby_lsn.xrecoff != 1)
+			PageSetLSN((Page)buffer, standby_lsn);
+	}
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
 									   reln->smgr_rnode.node.spcNode,
@@ -729,10 +790,13 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 #ifdef TRACE_STACK
 	xp_stack_trace(TRACE_SIZE, tv);
 #endif
+	XLogRecPtr ptr = PageGetLSN(buffer);
 	ereport(TRACE_LEVEL,
-		(errmsg("%ld.%ld:\tREAD:mdread:\tfile:%s\tforknum:%u\tblocknum:%u",
-				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
+		(errmsg("%ld.%ld:\tREAD:mdread:\tfile:%s\tforknum:%u\tblocknum:%u\tpageLSN:%u:%u\trnode:%u",
+				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum, ptr.xlogid, ptr.xrecoff,
+				reln->smgr_rnode.node.relNode)));
 #endif
+
 }
 
 /*
@@ -773,6 +837,41 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
+	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+	{
+		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), NotFoundLSN, HASH_ENTER_NULL);
+		append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
+	}
+	else if(standby_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+	{
+		XLogRecPtr lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
+		XLogRecPtr standby_lsn = PageGetLSN(buffer);
+		/*
+		 * Here, the xlogid should not be 0, because it only writes what the primary wants to write.
+		 * Hence, if this problem happens, there are two possible reasons:
+		 * 1.The entry in the block info file is not read yet.
+		 * 2.The standby write something not expected by the primary. This may
+		 * happen due to the buffer replacement algorithm. However, it might also
+		 * indicate the standby maintains different database physical structure(FATAL)
+		 */
+		if(lsn.xrecoff != 1)
+		{
+			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, standby_lsn, HASH_ENTER_NULL);
+
+			ereport(WARNING,
+					(errmsg("WriteABlock:file:%s\tblocknum:%u\tforknum:%u\tprimaryLSN:%u.%u\tstandbyLSN:%u.%u",
+							FilePathName(v->mdfd_vfd), blocknum, forknum,
+							lsn.xlogid, lsn.xrecoff, standby_lsn.xlogid, standby_lsn.xrecoff)));
+			PageSetLSN(buffer, lsn);
+		}
+		else
+		{
+			ereport(WARNING,
+					(errmsg("Unexpected block written by the standby:file:%s\tblocknum:%u\tforknum:%u\tpageLSN:%u.%u",
+							FilePathName(v->mdfd_vfd), blocknum, forknum, lsn.xlogid, lsn.xrecoff)));
+		}
+	}
+
 	nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ);
 
 	TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum,
@@ -804,9 +903,11 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 #ifdef TRACE_STACK
 	xp_stack_trace(TRACE_SIZE, tv);
 #endif
+	XLogRecPtr ptr = PageGetLSN(buffer);
 	ereport(TRACE_LEVEL,
-		(errmsg("%ld.%ld:\tWRITE:mdwrite:\tfile:%s\tforknum:%u\tblocknum:%u",
-				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum)));
+		(errmsg("%ld.%ld:\tWRITE:mdwrite:\tfile:%s\tforknum:%u\tblocknum:%u\tpageLSN:%u:%u\trelnode:%u",
+				tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), forknum, blocknum, ptr.xlogid, ptr.xrecoff,
+				reln->smgr_rnode.node.relNode)));
 #endif
 
 	if (!skipFsync && !SmgrIsTemp(reln))
@@ -927,7 +1028,8 @@ mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 						(errcode_for_file_access(),
 						 errmsg("could not truncate file \"%s\": %m",
 								FilePathName(v->mdfd_vfd))));
-			if(high_avail_mode)
+
+			if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
 			{
 				modify_last_block_hash(FilePathName(v->mdfd_vfd),
 										(BlockNumber)0,
@@ -1827,6 +1929,7 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 
 		if(blocknum != InvalidBlockNumber)
 		{
+/*
 #ifdef XP_TRACE_MD_READ
 			struct timeval tv;
 			gettimeofday(&tv, NULL);
@@ -1834,6 +1937,7 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 					(errmsg("%ld.%ld:\tREAD:_mdnblocks:\tfile:%s\tforknum:%u\tcacheblocknum:%d",
 							tv.tv_sec, tv.tv_usec, FilePathName(seg->mdfd_vfd), forknum, blocknum)));
 #endif
+*/
 			return blocknum;
 		}
 	}

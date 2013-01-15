@@ -1258,23 +1258,16 @@ FileWrite(File file, char *buffer, int amount)
 		}
 	}
 
-	if(!high_avail_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-	}
 
 	filename = FilePathName(file);
-	if(high_avail_mode &&
-	   strstr(filename, "pg_tmp") == NULL &&
-			(strstr(filename, "base/") != NULL||
-			 strstr(filename, "global/") != NULL
-			))
+	if(high_avail_mode && is_tracked(filename))
 	{
 		errno = 0;
 		returnCode = amount;
+#ifdef XP_TRACE_MD_WRITE
 		ereport(TRACE_LEVEL,
 			(errmsg("blockwrite:%s, returnsize:%d", filename, amount)));
+#endif
 	}
 	else
 	{
@@ -1469,14 +1462,18 @@ FileTruncate(File file, off_t offset)
 			))
 	{
 		returnCode = 0;
+#ifdef XP_TRACE_MD_WRITE
 		ereport(TRACE_LEVEL,
 			(errmsg("blocktruncation:%s", filename)));
+#endif
 	}
 	else
 	{
 		returnCode = ftruncate(VfdCache[file].fd, offset);
+#ifdef XP_TRACE_MD_WRITE
 		ereport(TRACE_LEVEL,
 			(errmsg("nonblocktruncation:%s, high_avail_mode:%c", filename, high_avail_mode+'0')));
+#endif
 	}
 
 

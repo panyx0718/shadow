@@ -738,6 +738,4 @@ extern void ExceptionalCondition(const char *conditionName,
 
 
 
-
-
 #endif   /* POSTGRES_H */

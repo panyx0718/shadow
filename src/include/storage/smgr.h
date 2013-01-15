@@ -15,10 +15,11 @@
 #define SMGR_H
 
 #include "utils/hsearch.h"
+#include "utils/pg_crc.h"
 #include "fmgr.h"
 #include "storage/block.h"
 #include "storage/relfilenode.h"
-
+#include "access/xlogdefs.h"
 
 /*
  * smgr.c maintains a table of SMgrRelation objects, which are essentially
@@ -78,10 +79,13 @@ typedef SMgrRelationData *SMgrRelation;
 	RelFileNodeBackendIsTemp((smgr)->smgr_rnode)
 
 
+extern HTAB *LastBlockHash;
+extern HTAB *BlockLSNHash;
+extern FILE *BlockInfoFile;
 
 typedef struct RelName
 {
-	char filename[128];
+	char filename[32];
 }RelName;
 
 typedef struct RelLastBlock
@@ -90,11 +94,31 @@ typedef struct RelLastBlock
 	BlockNumber last_block_num;
 	struct timeval tv;
 }RelLastBlockData;
-
 typedef RelLastBlockData *RelLastBlock;
 
-extern HTAB *LastBlockHash;
+#define LASTBLOCKHASHSIZE 100
 
+
+typedef struct BlockTag
+{
+	RelFileNode rnode;
+	ForkNumber forkno;
+	BlockNumber blkno;
+}BlockTag;
+
+typedef struct BlockLSNData
+{
+	BlockTag blk_tag;
+	XLogRecPtr lsn;
+	XLogRecPtr standby_lsn;
+}BlockLSNData;
+typedef BlockLSNData *BlockLSN;
+
+#define BLOCKLSNHASHSIZE (1 << 10)
+
+#define BlockInfo "global/blockinfo"
+
+extern XLogRecPtr NotFoundLSN;
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(RelFileNode rnode, BackendId backend);
@@ -123,9 +147,20 @@ extern void smgrsync(void);
 extern void smgrpostckpt(void);
 extern void AtEOXact_SMgr(void);
 
+bool is_tracked(char *filename);
+
 extern HTAB* init_last_block_hash();
 extern void modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action);
 extern BlockNumber get_last_block_hash(char *filename, HASHACTION action);
+
+extern HTAB* init_block_lsn_hash();
+extern void update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
+								XLogRecPtr lsn, XLogRecPtr standby_lsn, HASHACTION action);
+extern XLogRecPtr get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
+extern XLogRecPtr get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
+extern void append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush);
+extern void get_block_info();
+extern void flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn);
 
 /* internals: move me elsewhere -- ay 7/94 */
 

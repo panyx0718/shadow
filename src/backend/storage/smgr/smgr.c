@@ -24,6 +24,7 @@
 #include "utils/hsearch.h"
 #include "utils/inval.h"
 #include "replication/walsender.h"
+#include "catalog/pg_class.h"
 
 /*
  * This struct of function pointers defines the API between smgr.c and
@@ -79,10 +80,13 @@ static const int NSmgr = lengthof(smgrsw);
  * In addition, "unowned" SMgrRelation objects are chained together in a list.
  */
 static HTAB *SMgrRelationHash = NULL;
-HTAB *LastBlockHash = NULL;
+
 static SMgrRelation first_unowned_reln = NULL;
 
-
+HTAB *LastBlockHash = NULL;
+HTAB *BlockLSNHash = NULL;
+FILE *BlockInfoFile = NULL;
+XLogRecPtr NotFoundLSN = {0, 1};
 
 /* local function prototypes */
 static void smgrshutdown(int code, Datum arg);
@@ -486,6 +490,13 @@ void
 smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		   char *buffer, bool skipFsync)
 {
+	if(!high_avail_mode && !standby_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+		if(access("pg_tmp/standby_mode", F_OK) == 0)
+			standby_mode = true;
+	}
 
 	(*(smgrsw[reln->smgr_which].smgr_extend)) (reln, forknum, blocknum,
 											   buffer, skipFsync);
@@ -512,6 +523,14 @@ void
 smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		 char *buffer)
 {
+	if(!high_avail_mode && !standby_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+		if(access("pg_tmp/standby_mode", F_OK) == 0)
+			standby_mode = true;
+	}
+
 	(*(smgrsw[reln->smgr_which].smgr_read)) (reln, forknum, blocknum, buffer);
 }
 
@@ -534,6 +553,14 @@ void
 smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		  char *buffer, bool skipFsync)
 {
+	if(!high_avail_mode && !standby_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+		if(access("pg_tmp/standby_mode", F_OK) == 0)
+			standby_mode = true;
+	}
+
 	(*(smgrsw[reln->smgr_which].smgr_write)) (reln, forknum, blocknum,
 											  buffer, skipFsync);
 }
@@ -545,6 +572,14 @@ smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 BlockNumber
 smgrnblocks(SMgrRelation reln, ForkNumber forknum)
 {
+	if(!high_avail_mode && !standby_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+		if(access("pg_tmp/standby_mode", F_OK) == 0)
+			standby_mode = true;
+	}
+
 	return (*(smgrsw[reln->smgr_which].smgr_nblocks)) (reln, forknum);
 }
 
@@ -557,6 +592,13 @@ smgrnblocks(SMgrRelation reln, ForkNumber forknum)
 void
 smgrtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 {
+	if(!high_avail_mode && !standby_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+		if(access("pg_tmp/standby_mode", F_OK) == 0)
+			standby_mode = true;
+	}
 	/*
 	 * Get rid of any buffers for the about-to-be-deleted blocks. bufmgr will
 	 * just drop them without bothering to write the contents.
@@ -683,28 +725,38 @@ AtEOXact_SMgr(void)
 }
 
 
+bool
+is_tracked(char *filename)
+{
+	if(strstr(filename, "pg_tmp") != NULL ||
+			(strstr(filename, "base/") == NULL &&
+			 strstr(filename, "global/") == NULL))
+		return false;
+
+	return true;
+}
+
 HTAB*
 init_last_block_hash()
 {
-	HTAB* LastBlockHash = NULL;
 	HASHCTL info;
 	int hash_flags;
-	long init_table_size = 100;
-	long max_table_size = 100;
+	long init_table_size = LASTBLOCKHASHSIZE;
+	long max_table_size = init_table_size;
 
+	if(LastBlockHash != NULL)
+		return LastBlockHash;
 
 	MemSet(&info, 0, sizeof(info));
 	info.keysize = sizeof(RelName);
 	info.entrysize = sizeof(RelLastBlockData);
 	hash_flags = HASH_ELEM;
 
-	LastBlockHash =  ShmemInitHash("relation last block",
+	return ShmemInitHash("relation last block",
 								init_table_size,
 								max_table_size,
 								&info,
 								hash_flags);
-
-	return LastBlockHash;
 }
 
 void
@@ -715,10 +767,6 @@ modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action)
 	RelLastBlock val;
 	struct timeval tv;
 
-	if(strstr(filename, "pg_tmp") != NULL ||
-			(strstr(filename, "base/") == NULL &&
-			 strstr(filename, "global/") == NULL))
-		return;
 
 	if(LastBlockHash == NULL)
 	{
@@ -732,12 +780,16 @@ modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action)
 									&rel_name,
 									action,
 									&found);
+
+	if(action == HASH_REMOVE)
+		return;
+
 	if(val != NULL)
 	{
 		val->last_block_num = blocknum;
 		gettimeofday(&val->tv, NULL);
 	}
-	else
+	else if(action == HASH_ENTER_NULL)
 		ereport(ERROR,
 			(errmsg("%ld.%ld:\tOutofMemory for last block hash",
 					tv.tv_sec, tv.tv_usec)));
@@ -750,6 +802,14 @@ get_last_block_hash(char *filename, HASHACTION action)
 	RelName rel_name;
 	RelLastBlock val;
 
+	if(LastBlockHash == NULL)
+	{
+		LastBlockHash = init_last_block_hash();
+		ereport(TRACE_LEVEL,
+				(errmsg("LastBlockHash:%p", LastBlockHash)));
+		return InvalidBlockNumber;
+	}
+
 	strcpy(rel_name.filename, filename);
 	val = (RelLastBlock) hash_search(LastBlockHash,
 										&rel_name,
@@ -760,4 +820,203 @@ get_last_block_hash(char *filename, HASHACTION action)
 		return val->last_block_num;
 	else
 		return InvalidBlockNumber;
+}
+
+
+HTAB*
+init_block_lsn_hash()
+{
+	HASHCTL		info;
+	info.keysize = sizeof(BlockTag);
+	info.entrysize = sizeof(BlockLSNData);
+	info.num_partitions = 16;
+	long init_size = BLOCKLSNHASHSIZE;
+	long max_size = init_size;
+	info.hash = tag_hash;
+
+	if(BlockLSNHash != NULL)
+		return BlockLSNHash;
+
+	return ShmemInitHash("block lsn",
+							init_size, max_size,
+							&info,
+							HASH_ELEM | HASH_PARTITION | HASH_FUNCTION);
+}
+
+/**
+ * HashACTION should be either
+ * HASH_REMOVE or
+ * HASH_ENTER_NULL
+ */
+void
+update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
+					XLogRecPtr lsn, XLogRecPtr standby_lsn, HASHACTION action)
+{
+	BlockTag blk_tag;
+	bool found;
+	BlockLSN val;
+
+	if(BlockLSNHash == NULL)
+	{
+		BlockLSNHash = init_block_lsn_hash();
+		ereport(TRACE_LEVEL,
+				(errmsg("BlockLSNHash:%p", BlockLSNHash)));
+	}
+
+	blk_tag.rnode = rnode;
+	blk_tag.forkno = forknum;
+	blk_tag.blkno = blocknum;
+	val = (BlockLSN) hash_search(BlockLSNHash,
+									&blk_tag,
+									action,
+									&found);
+	if(action == HASH_REMOVE)
+		return;
+	if(val != NULL)
+	{
+		val->lsn = lsn;
+		val->standby_lsn = standby_lsn;
+	}
+	else if(action == HASH_ENTER_NULL)
+		ereport(ERROR,
+			(errmsg("OutofMemory for block lsn hash")));
+}
+
+XLogRecPtr
+get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
+{
+	bool found;
+	BlockTag blk_tag;
+	BlockLSN val;
+	XLogRecPtr invalid = {0, 1};
+
+	if(BlockLSNHash == NULL)
+	{
+		BlockLSNHash = init_block_lsn_hash();
+		ereport(TRACE_LEVEL,
+				(errmsg("BlockLSNHash:%p", BlockLSNHash)));
+	}
+
+	blk_tag.rnode = rnode;
+	blk_tag.blkno = blocknum;
+	blk_tag.forkno = forknum;
+	val = (BlockLSN) hash_search(BlockLSNHash,
+										&blk_tag,
+										HASH_FIND,
+										&found);
+
+	if(val != NULL)
+		return val->lsn;
+	else
+		return invalid;
+}
+
+XLogRecPtr
+get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
+{
+	bool found;
+	BlockTag blk_tag;
+	BlockLSN val;
+	XLogRecPtr invalid = {0, 1};
+
+	if(BlockLSNHash == NULL)
+	{
+		BlockLSNHash = init_block_lsn_hash();
+		ereport(TRACE_LEVEL,
+				(errmsg("BlockLSNHash:%p", BlockLSNHash)));
+	}
+
+	blk_tag.rnode = rnode;
+	blk_tag.blkno = blocknum;
+	blk_tag.forkno = forknum;
+	val = (BlockLSN) hash_search(BlockLSNHash,
+										&blk_tag,
+										HASH_FIND,
+										&found);
+
+	if(val != NULL)
+		return val->standby_lsn;
+	else
+		return invalid;
+}
+
+void
+append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush)
+{
+	if(BlockInfoFile == NULL)
+	{
+		if((BlockInfoFile = fopen(BlockInfo, "r+")) == NULL)
+		{
+			ereport(ERROR,
+				(errmsg("Cannot open block info file")));
+			return;
+		}
+	}
+	fseek(BlockInfoFile, 0, SEEK_END);
+	fprintf(BlockInfoFile, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
+			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff, flush+'0');
+	fflush(BlockInfoFile);
+}
+
+
+void
+get_block_info()
+{
+	RelFileNode rnode;
+	ForkNumber forknum;
+	BlockNumber blocknum;
+	XLogRecPtr lsn;
+	bool flush;
+	int ret;
+
+	while(BlockInfoFile == NULL)
+	{
+		if((BlockInfoFile = fopen(BlockInfo, "r")) == NULL)
+		{
+			ereport(ERROR,
+				(errmsg("Cannot open block info file")));
+			sleep(1);
+		}
+	}
+
+	while(1)
+	{
+		ret = fscanf(BlockInfoFile, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
+				&rnode.spcNode, &rnode.dbNode, &rnode.relNode, &forknum, &blocknum, &lsn.xlogid, &lsn.xrecoff, &flush);
+		if(ret > 0)
+		{
+			ereport(WARNING,
+					(errmsg("PrimaryPosition:%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
+					rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff, flush)));
+			if(flush-'0' != 0)
+				flush_block(rnode, forknum, blocknum, lsn);
+			else
+				update_block_lsn(rnode, forknum, blocknum, lsn, NotFoundLSN, HASH_ENTER_NULL);
+		}
+		else
+			usleep(10000);
+	}
+}
+
+void
+flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn)
+{
+	Buffer buf;
+	Page page;
+	SMgrRelation smgr;
+
+	ereport(WARNING,
+			(errmsg("FlushRequest:%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff)));
+
+	smgr = smgropen(rnode, InvalidBackendId);
+	buf = ReadBufferWithoutRelcache(rnode, forknum, blocknum, RBM_NORMAL, NULL);
+
+	LockBuffer(buf, BUFFER_LOCK_SHARE);
+
+	page = (Page) BufferGetPage(buf);
+	PageSetLSN(page, lsn);
+	smgrwrite(smgr, forknum, blocknum, (char*)page, false);
+
+	UnlockReleaseBuffer(buf);
 }
