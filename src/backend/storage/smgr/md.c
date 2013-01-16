@@ -741,9 +741,6 @@ retry:
 			else
 				update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, NotFoundLSN, HASH_REMOVE);
 		}
-		ereport(TRACE_LEVEL,
-				(errmsg("diskLSN:%u.%u\tneedLSN:%u.%u",
-						cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
 	}
 	else if(standby_mode && is_tracked(FilePathName(v->mdfd_vfd)))
 	{

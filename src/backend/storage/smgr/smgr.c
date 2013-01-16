@@ -860,7 +860,7 @@ update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
 	{
 		BlockLSNHash = init_block_lsn_hash();
 		ereport(TRACE_LEVEL,
-				(errmsg("BlockLSNHash:%p", BlockLSNHash)));
+				(errmsg("update_block_lsn:BlockLSNHash:%p", BlockLSNHash)));
 	}
 
 	blk_tag.rnode = rnode;
@@ -894,7 +894,7 @@ get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
 	{
 		BlockLSNHash = init_block_lsn_hash();
 		ereport(TRACE_LEVEL,
-				(errmsg("BlockLSNHash:%p", BlockLSNHash)));
+				(errmsg("get_block_lsn:BlockLSNHash:%p", BlockLSNHash)));
 	}
 
 	blk_tag.rnode = rnode;
@@ -923,7 +923,7 @@ get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknu
 	{
 		BlockLSNHash = init_block_lsn_hash();
 		ereport(TRACE_LEVEL,
-				(errmsg("BlockLSNHash:%p", BlockLSNHash)));
+				(errmsg("get_standby_block_lsn:BlockLSNHash:%p", BlockLSNHash)));
 	}
 
 	blk_tag.rnode = rnode;
