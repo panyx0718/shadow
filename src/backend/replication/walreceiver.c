@@ -285,37 +285,40 @@ WalReceiverMain(void)
 	MemSet(&feedback_message, 0, sizeof(feedback_message));
 
 
-
-	/* xp. start standby mode */
-	BlockLSNHash = init_block_lsn_hash();
-
-	/* primary trigger file for other process */
-	int fd = BasicOpenFile("pg_tmp/standby_mode",
-							   O_WRONLY | O_CREAT | PG_BINARY,
-							   S_IRUSR | S_IWUSR);
-	close(fd);
-
-	/* fork the child process for reading block info file */
-	int pd = fork();
-	if(pd == 0)
+	if(high_avail_mode || !standby_mode)
 	{
-		get_block_info();
-		return;
+		/* xp. start standby mode */
+		BlockLSNHash = init_block_lsn_hash();
+
+		/* primary trigger file for other process */
+		int fd = BasicOpenFile("pg_tmp/standby_mode",
+								   O_WRONLY | O_CREAT | PG_BINARY,
+								   S_IRUSR | S_IWUSR);
+		close(fd);
+
+		/* fork the child process for reading block info file */
+		int pd = fork();
+		if(pd == 0)
+		{
+			get_block_info();
+			return;
+		}
+		else if(pd < 0)
+			ereport(ERROR,
+					(errmsg("Cannot fork get block info process")));
+
+		/* change the mode information */
+		standby_mode = true;
+		high_avail_mode = false;
+
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		xp_stack_trace(TRACE_SIZE, tv);
+		ereport(WARNING,
+			(errmsg("%ld:%ld\tStartStandbyMode\tstandby_mode:%c\thigh_avail_mode:%c\tBlockLSNHash:%p",
+					tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0', BlockLSNHash)));
 	}
-	else if(pd < 0)
-		ereport(ERROR,
-				(errmsg("Cannot fork get block info process")));
 
-	/* change the mode information */
-	standby_mode = true;
-	high_avail_mode = false;
-
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	xp_stack_trace(TRACE_SIZE, tv);
-	ereport(WARNING,
-		(errmsg("%ld:%ld\tStartStandbyMode\tstandby_mode:%c\thigh_avail_mode:%c\tBlockLSNHash:%p",
-				tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0', BlockLSNHash)));
 
 	/* Loop until end-of-streaming or error */
 	for (;;)

@@ -741,44 +741,45 @@ WalSndLoop(void)
 	 * we hope this block is executed only once by primary
 	 */
 
+	if(!high_avail_mode || standby_mode)
+	{
+		LastBlockHash = init_last_block_hash();
+		BlockLSNHash = init_block_lsn_hash();
+		/*
+		bool found;
+		RelName rel_name;
+		RelLastBlock val;
 
-	LastBlockHash = init_last_block_hash();
-	BlockLSNHash = init_block_lsn_hash();
-	/*
-	bool found;
-	RelName rel_name;
-	RelLastBlock val;
-
-	strcpy(rel_name.filename, "test");
-	val = (RelLastBlock) hash_search(LastBlockHash,
-										&rel_name,
-										HASH_ENTER,
-										&found);
-	val->last_block_num = 0;
-	gettimeofday(&val->tv, NULL);
-	*/
+		strcpy(rel_name.filename, "test");
+		val = (RelLastBlock) hash_search(LastBlockHash,
+											&rel_name,
+											HASH_ENTER,
+											&found);
+		val->last_block_num = 0;
+		gettimeofday(&val->tv, NULL);
+		*/
 
 
-	/* primary trigger file for other process */
-	int fd = BasicOpenFile("pg_tmp/high_avail_mode",
-						   O_WRONLY | O_CREAT | PG_BINARY,
-						   S_IRUSR | S_IWUSR);
-	close(fd);
+		/* primary trigger file for other process */
+		int fd = BasicOpenFile("pg_tmp/high_avail_mode",
+							   O_WRONLY | O_CREAT | PG_BINARY,
+							   S_IRUSR | S_IWUSR);
+		close(fd);
 
-	/* blockID->LSN info file */
-	BlockInfoFile = fopen(BlockInfo, "w");
-	fclose(BlockInfoFile);
+		/* blockID->LSN info file */
+		BlockInfoFile = fopen(BlockInfo, "w");
+		fclose(BlockInfoFile);
 
-	high_avail_mode = true;
-	standby_mode = false;
+		high_avail_mode = true;
+		standby_mode = false;
 
-	struct	timeval	tv;
-	gettimeofday(&tv, NULL);
-	xp_stack_trace(TRACE_SIZE, tv);
-	ereport(WARNING,
-			(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\thigh_avail_mode=%c\tLastBlockHash:%p\tBlockLSNHash:%p",
-					tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0', LastBlockHash, BlockLSNHash)));
-
+		struct	timeval	tv;
+		gettimeofday(&tv, NULL);
+		xp_stack_trace(TRACE_SIZE, tv);
+		ereport(WARNING,
+				(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\thigh_avail_mode=%c\tLastBlockHash:%p\tBlockLSNHash:%p",
+						tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0', LastBlockHash, BlockLSNHash)));
+	}
 
 
 	/* Loop forever, unless we get an error */
