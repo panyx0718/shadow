@@ -110,11 +110,10 @@ typedef struct BlockLSNData
 {
 	BlockTag blk_tag;
 	XLogRecPtr lsn;
-	XLogRecPtr standby_lsn;
 }BlockLSNData;
 typedef BlockLSNData *BlockLSN;
 
-#define BLOCKLSNHASHSIZE (1 << 10)
+#define BLOCKLSNHASHSIZE (1 << 20)
 
 #define BlockInfo "global/blockinfo"
 
@@ -155,13 +154,14 @@ extern BlockNumber get_last_block_hash(char *filename, HASHACTION action);
 
 extern HTAB* init_block_lsn_hash();
 extern void update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
-								XLogRecPtr lsn, XLogRecPtr standby_lsn, HASHACTION action);
+								XLogRecPtr lsn, HASHACTION action);
 extern XLogRecPtr get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
 extern XLogRecPtr get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
 extern void append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush);
 extern void get_block_info();
 extern void flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn);
 
+extern Size BlockLSNSize();
 /* internals: move me elsewhere -- ay 7/94 */
 
 /* in md.c */

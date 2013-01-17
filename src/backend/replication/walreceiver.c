@@ -285,7 +285,7 @@ WalReceiverMain(void)
 	MemSet(&feedback_message, 0, sizeof(feedback_message));
 
 
-	if(high_avail_mode || !standby_mode)
+	if(access("pg_tmp/standby_mode", F_OK) != 0)
 	{
 		/* xp. start standby mode */
 		BlockLSNHash = init_block_lsn_hash();

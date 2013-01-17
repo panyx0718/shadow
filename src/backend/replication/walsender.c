@@ -737,28 +737,12 @@ WalSndLoop(void)
 	last_reply_timestamp = GetCurrentTimestamp();
 
 
-	/* xp. start high avail mode,
-	 * we hope this block is executed only once by primary
-	 */
 
-	if(!high_avail_mode || standby_mode)
+	if(access("pg_tmp/high_avail_mode", F_OK) != 0)
 	{
+		/* xp. start high avail mode */
 		LastBlockHash = init_last_block_hash();
 		BlockLSNHash = init_block_lsn_hash();
-		/*
-		bool found;
-		RelName rel_name;
-		RelLastBlock val;
-
-		strcpy(rel_name.filename, "test");
-		val = (RelLastBlock) hash_search(LastBlockHash,
-											&rel_name,
-											HASH_ENTER,
-											&found);
-		val->last_block_num = 0;
-		gettimeofday(&val->tv, NULL);
-		*/
-
 
 		/* primary trigger file for other process */
 		int fd = BasicOpenFile("pg_tmp/high_avail_mode",

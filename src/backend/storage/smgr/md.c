@@ -533,7 +533,7 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		{
 			int newblknum = blocknum % ((BlockNumber) RELSEG_SIZE) + 1;
 			modify_last_block_hash(filename, newblknum, HASH_ENTER_NULL);
-			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), NotFoundLSN, HASH_ENTER_NULL);
+			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), HASH_ENTER_NULL);
 			//append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
 		}
 	}
@@ -700,16 +700,22 @@ retry:
 
 
 	XLogRecPtr cur_lsn;
-	XLogRecPtr lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
-	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)) && lsn.xrecoff == 0)
+	XLogRecPtr lsn;
+	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
-		/* new buffers are zero-filled */
-		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, NotFoundLSN, HASH_REMOVE);
-		ereport(TRACE_LEVEL,
-				(errmsg("FakeABlock:rnode:%u\tblocknum:%u",
-						reln->smgr_rnode.node.relNode, blocknum)));
-		MemSet((char *) buffer, 0, BLCKSZ);
-		nbytes = BLCKSZ;
+		lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
+		if(lsn.xrecoff == 0)
+		{
+			/* new buffers are zero-filled */
+			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, HASH_REMOVE);
+			ereport(TRACE_LEVEL,
+					(errmsg("FakeABlock:rnode:%u\tblocknum:%u",
+							reln->smgr_rnode.node.relNode, blocknum)));
+			MemSet((char *) buffer, 0, BLCKSZ);
+			nbytes = BLCKSZ;
+		}
+		else
+			nbytes = FileRead(v->mdfd_vfd, buffer, BLCKSZ);
 	}
 	else
 		nbytes = FileRead(v->mdfd_vfd, buffer, BLCKSZ);
@@ -739,14 +745,8 @@ retry:
 				goto retry;
 			}
 			else
-				update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, NotFoundLSN, HASH_REMOVE);
+				update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, HASH_REMOVE);
 		}
-	}
-	else if(standby_mode && is_tracked(FilePathName(v->mdfd_vfd)))
-	{
-		XLogRecPtr standby_lsn = get_standby_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
-		if(standby_lsn.xrecoff != 1)
-			PageSetLSN((Page)buffer, standby_lsn);
 	}
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
@@ -836,7 +836,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 
 	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
-		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), NotFoundLSN, HASH_ENTER_NULL);
+		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), HASH_ENTER_NULL);
 		append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
 	}
 	else if(standby_mode && is_tracked(FilePathName(v->mdfd_vfd)))
@@ -853,13 +853,10 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		 */
 		if(lsn.xrecoff != 1)
 		{
-			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, standby_lsn, HASH_ENTER_NULL);
-
 			ereport(WARNING,
 					(errmsg("WriteABlock:file:%s\tblocknum:%u\tforknum:%u\tprimaryLSN:%u.%u\tstandbyLSN:%u.%u",
 							FilePathName(v->mdfd_vfd), blocknum, forknum,
 							lsn.xlogid, lsn.xrecoff, standby_lsn.xlogid, standby_lsn.xrecoff)));
-			PageSetLSN(buffer, lsn);
 		}
 		else
 		{

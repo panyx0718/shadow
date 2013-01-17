@@ -822,6 +822,11 @@ get_last_block_hash(char *filename, HASHACTION action)
 		return InvalidBlockNumber;
 }
 
+Size BlockLSNSize()
+{
+	Size size = 0;
+	return add_size(size, BLOCKLSNHASHSIZE * sizeof(BlockLSNData));
+}
 
 HTAB*
 init_block_lsn_hash()
@@ -850,7 +855,7 @@ init_block_lsn_hash()
  */
 void
 update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
-					XLogRecPtr lsn, XLogRecPtr standby_lsn, HASHACTION action)
+					XLogRecPtr lsn, HASHACTION action)
 {
 	BlockTag blk_tag;
 	bool found;
@@ -875,7 +880,6 @@ update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
 	if(val != NULL)
 	{
 		val->lsn = lsn;
-		val->standby_lsn = standby_lsn;
 	}
 	else if(action == HASH_ENTER_NULL)
 		ereport(ERROR,
@@ -911,34 +915,6 @@ get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
 		return invalid;
 }
 
-XLogRecPtr
-get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
-{
-	bool found;
-	BlockTag blk_tag;
-	BlockLSN val;
-	XLogRecPtr invalid = {0, 1};
-
-	if(BlockLSNHash == NULL)
-	{
-		BlockLSNHash = init_block_lsn_hash();
-		ereport(TRACE_LEVEL,
-				(errmsg("get_standby_block_lsn:BlockLSNHash:%p", BlockLSNHash)));
-	}
-
-	blk_tag.rnode = rnode;
-	blk_tag.blkno = blocknum;
-	blk_tag.forkno = forknum;
-	val = (BlockLSN) hash_search(BlockLSNHash,
-										&blk_tag,
-										HASH_FIND,
-										&found);
-
-	if(val != NULL)
-		return val->standby_lsn;
-	else
-		return invalid;
-}
 
 void
 append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush)
@@ -991,7 +967,7 @@ get_block_info()
 			if(flush-'0' != 0)
 				flush_block(rnode, forknum, blocknum, lsn);
 			else
-				update_block_lsn(rnode, forknum, blocknum, lsn, NotFoundLSN, HASH_ENTER_NULL);
+				update_block_lsn(rnode, forknum, blocknum, lsn, HASH_ENTER_NULL);
 		}
 		else
 			usleep(10000);
@@ -1010,8 +986,11 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff)));
 
 	smgr = smgropen(rnode, InvalidBackendId);
-	buf = ReadBufferWithoutRelcache(rnode, forknum, blocknum, RBM_NORMAL, NULL);
 
+	if(!InRecovery && RecoveryInProgress())
+		InRecovery = true;
+
+	buf = ReadBufferWithoutRelcache(rnode, forknum, blocknum, RBM_NORMAL, NULL);
 	LockBuffer(buf, BUFFER_LOCK_SHARE);
 
 	page = (Page) BufferGetPage(buf);
