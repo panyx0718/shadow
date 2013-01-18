@@ -862,7 +862,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		{
 			ereport(WARNING,
 					(errmsg("Unexpected block written by the standby:file:%s\tblocknum:%u\tforknum:%u\tpageLSN:%u.%u",
-							FilePathName(v->mdfd_vfd), blocknum, forknum, lsn.xlogid, lsn.xrecoff)));
+							FilePathName(v->mdfd_vfd), blocknum, forknum, standby_lsn.xlogid, standby_lsn.xrecoff)));
 		}
 	}
 

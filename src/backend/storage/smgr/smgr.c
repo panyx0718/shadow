@@ -825,7 +825,8 @@ get_last_block_hash(char *filename, HASHACTION action)
 Size BlockLSNSize()
 {
 	Size size = 0;
-	return add_size(size, BLOCKLSNHASHSIZE * sizeof(BlockLSNData));
+	size = mul_size(BLOCKLSNHASHSIZE*2, sizeof(BlockLSNData));
+	return size;
 }
 
 HTAB*
@@ -949,7 +950,7 @@ get_block_info()
 	{
 		if((BlockInfoFile = fopen(BlockInfo, "r")) == NULL)
 		{
-			ereport(ERROR,
+			ereport(WARNING,
 				(errmsg("Cannot open block info file")));
 			sleep(1);
 		}

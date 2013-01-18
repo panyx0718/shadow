@@ -230,7 +230,6 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 	AutoVacuumShmemInit();
 	WalSndShmemInit();
 	WalRcvShmemInit();
-
 	/*
 	 * Set up other modules that need some shared memory space
 	 */

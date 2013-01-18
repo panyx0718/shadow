@@ -117,7 +117,6 @@ typedef BlockLSNData *BlockLSN;
 
 #define BlockInfo "global/blockinfo"
 
-extern XLogRecPtr NotFoundLSN;
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(RelFileNode rnode, BackendId backend);
