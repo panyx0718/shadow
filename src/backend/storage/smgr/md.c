@@ -678,7 +678,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	int			nbytes;
 	MdfdVec    *v;
 	struct timeval tv;
-	bool 	try = true;
+	uint32 sleep_time = 100000;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -736,12 +736,9 @@ retry:
 					(errmsg("WrongLSN:%ld.%ld:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
 							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
-				if(try)
-				{
-					append_block_info(reln->smgr_rnode.node, forknum, blocknum, lsn, true);
-					try = false;
-				}
-				usleep(100000);
+				append_block_info(reln->smgr_rnode.node, forknum, blocknum, lsn, true);
+
+				usleep(sleep_time);
 				goto retry;
 			}
 			else

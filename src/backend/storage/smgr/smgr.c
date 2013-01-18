@@ -143,6 +143,14 @@ smgropen(RelFileNode rnode, BackendId backend)
 	SMgrRelation reln;
 	bool		found;
 
+	if(!high_avail_mode && !standby_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+		if(access("pg_tmp/standby_mode", F_OK) == 0)
+			standby_mode = true;
+	}
+
 	if (SMgrRelationHash == NULL)
 	{
 		/* First time through: initialize the hash table */
@@ -508,6 +516,14 @@ smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 void
 smgrprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 {
+	if(!high_avail_mode && !standby_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+		if(access("pg_tmp/standby_mode", F_OK) == 0)
+			standby_mode = true;
+	}
+
 	(*(smgrsw[reln->smgr_which].smgr_prefetch)) (reln, forknum, blocknum);
 }
 
@@ -675,6 +691,14 @@ void
 smgrsync(void)
 {
 	int			i;
+
+	if(!high_avail_mode && !standby_mode)
+	{
+		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
+			high_avail_mode = true;
+		if(access("pg_tmp/standby_mode", F_OK) == 0)
+			standby_mode = true;
+	}
 
 	for (i = 0; i < NSmgr; i++)
 	{
