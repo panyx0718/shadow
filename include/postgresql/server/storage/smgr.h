@@ -19,6 +19,7 @@
 #include "fmgr.h"
 #include "storage/block.h"
 #include "storage/relfilenode.h"
+#include "storage/s_lock.h"
 #include "access/xlogdefs.h"
 
 /*
@@ -79,9 +80,7 @@ typedef SMgrRelationData *SMgrRelation;
 	RelFileNodeBackendIsTemp((smgr)->smgr_rnode)
 
 
-extern HTAB *LastBlockHash;
-extern HTAB *BlockLSNHash;
-extern FILE *BlockInfoFile;
+
 
 typedef struct RelName
 {
@@ -114,9 +113,20 @@ typedef struct BlockLSNData
 typedef BlockLSNData *BlockLSN;
 
 #define BLOCKLSNHASHSIZE (1 << 20)
-
 #define BlockInfo "global/blockinfo"
 
+
+typedef struct XLogApplyData
+{
+	XLogRecPtr apply;
+}XLogApplyData;
+typedef XLogApplyData *XLogApply;
+
+
+extern HTAB *LastBlockHash;
+extern HTAB *BlockLSNHash;
+extern FILE *BlockInfoFile;
+extern	XLogApply xlog_apply;
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(RelFileNode rnode, BackendId backend);

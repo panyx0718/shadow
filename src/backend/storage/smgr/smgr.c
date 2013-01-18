@@ -86,7 +86,7 @@ static SMgrRelation first_unowned_reln = NULL;
 HTAB *LastBlockHash = NULL;
 HTAB *BlockLSNHash = NULL;
 FILE *BlockInfoFile = NULL;
-XLogRecPtr NotFoundLSN = {0, 1};
+XLogApply xlog_apply = NULL;
 
 /* local function prototypes */
 static void smgrshutdown(int code, Datum arg);
@@ -946,7 +946,7 @@ append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, X
 {
 	if(BlockInfoFile == NULL)
 	{
-		if((BlockInfoFile = fopen(BlockInfo, "r+")) == NULL)
+		if((BlockInfoFile = fopen(BlockInfo, "a")) == NULL)
 		{
 			ereport(ERROR,
 				(errmsg("Cannot open block info file")));
@@ -959,6 +959,10 @@ append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, X
 	fflush(BlockInfoFile);
 }
 
+void shutdownHandler()
+{
+	exit(1);
+}
 
 void
 get_block_info()
@@ -970,6 +974,9 @@ get_block_info()
 	bool flush;
 	int ret;
 
+	pqsignal(SIGTERM, shutdownHandler);	/* request shutdown */
+	pqsignal(SIGQUIT, shutdownHandler);	/* hard crash time */
+
 	while(BlockInfoFile == NULL)
 	{
 		if((BlockInfoFile = fopen(BlockInfo, "r")) == NULL)
@@ -979,9 +986,13 @@ get_block_info()
 			sleep(1);
 		}
 	}
+	fseek(BlockInfoFile, 0, SEEK_END);
 
 	while(1)
 	{
+		if (!PostmasterIsAlive())
+			exit(1);
+
 		ret = fscanf(BlockInfoFile, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
 				&rnode.spcNode, &rnode.dbNode, &rnode.relNode, &forknum, &blocknum, &lsn.xlogid, &lsn.xrecoff, &flush);
 		if(ret > 0)
@@ -1005,10 +1016,31 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 	Buffer buf;
 	Page page;
 	SMgrRelation smgr;
+	bool found;
 
 	ereport(WARNING,
-			(errmsg("FlushRequest:%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+			(errmsg("FlushRequest:%u\t%u\t%u\t%u\t%u\t%u\t%u",
 			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff)));
+
+	if(xlog_apply == NULL)
+	{
+		xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
+		if(found)
+			ereport(WARNING,
+					(errmsg("Xlog Apply not inited by walreceiver")));
+	}
+	if(!XLByteLT(lsn, xlog_apply->apply))
+	{
+		ereport(WARNING,
+				(errmsg("FlushRequestDelay:applied:%u.%u\trequest:%u.%u",
+						xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff, lsn.xlogid, lsn.xrecoff)));
+		return;
+	}
+
+	ereport(WARNING,
+			(errmsg("FlushRequest:%u\t%u\t%u\t%u\t%u\tapplied:%u.%u\trequested:%u.%u",
+			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
+			xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff, lsn.xlogid, lsn.xrecoff)));
 
 	smgr = smgropen(rnode, InvalidBackendId);
 
@@ -1024,3 +1056,5 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 
 	UnlockReleaseBuffer(buf);
 }
+
+

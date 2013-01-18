@@ -76,7 +76,7 @@ static TimeLineID	recvFileTLI = 0;
 static uint32 recvId = 0;
 static uint32 recvSeg = 0;
 static uint32 recvOff = 0;
-
+static int 	cid = 0;
 /*
  * Flags set by interrupt handlers of walreceiver for later service in the
  * main loop.
@@ -172,7 +172,7 @@ WalReceiverMain(void)
 {
 	char		conninfo[MAXCONNINFO];
 	XLogRecPtr	startpoint;
-
+	int			state;
 	/* use volatile pointer to prevent code rearrangement */
 	volatile WalRcvData *walrcv = WalRcv;
 
@@ -290,6 +290,9 @@ WalReceiverMain(void)
 		/* xp. start standby mode */
 		BlockLSNHash = init_block_lsn_hash();
 
+		bool found;
+		xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
+
 		/* primary trigger file for other process */
 		int fd = BasicOpenFile("pg_tmp/standby_mode",
 								   O_WRONLY | O_CREAT | PG_BINARY,
@@ -297,13 +300,13 @@ WalReceiverMain(void)
 		close(fd);
 
 		/* fork the child process for reading block info file */
-		int pd = fork();
-		if(pd == 0)
+		cid = fork();
+		if(cid == 0)
 		{
 			get_block_info();
 			return;
 		}
-		else if(pd < 0)
+		else if(cid < 0)
 			ereport(ERROR,
 					(errmsg("Cannot fork get block info process")));
 
@@ -379,6 +382,22 @@ WalReceiverMain(void)
 			XLogWalRcvSendReply();
 			XLogWalRcvSendHSFeedback();
 		}
+
+		if(waitpid(cid, &state, WNOHANG) != 0)
+		{
+			ereport(WARNING,
+					(errmsg("Get Block Info state changed:%d", state)));
+
+			cid = fork();
+			if(cid == 0)
+			{
+				get_block_info();
+				return;
+			}
+			else if(cid < 0)
+				ereport(ERROR,
+						(errmsg("Cannot fork get block info process")));
+		}
 	}
 }
 
@@ -420,7 +439,7 @@ WalRcvShutdownHandler(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	got_SIGTERM = true;
-
+	kill(cid, 9);
 	/* Don't joggle the elbow of proc_exit */
 	if (!proc_exit_inprogress && WalRcvImmediateInterruptOK)
 		ProcessWalRcvInterrupts();
@@ -438,7 +457,7 @@ static void
 WalRcvQuickDieHandler(SIGNAL_ARGS)
 {
 	PG_SETMASK(&BlockSig);
-
+	kill(cid, 9);
 	/*
 	 * We DO NOT want to run proc_exit() callbacks -- we're here because
 	 * shared memory may be corrupted, so we don't want to try to clean up our
@@ -703,6 +722,9 @@ XLogWalRcvSendReply(void)
 	reply_message.flush = LogstreamResult.Flush;
 	reply_message.apply = GetXLogReplayRecPtr(NULL);
 	reply_message.sendTime = now;
+
+	if(xlog_apply != NULL)
+		xlog_apply->apply = reply_message.apply;
 
 	elog(DEBUG2, "sending write %X/%X flush %X/%X apply %X/%X",
 		 reply_message.write.xlogid, reply_message.write.xrecoff,
