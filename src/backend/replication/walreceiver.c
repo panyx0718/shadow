@@ -285,8 +285,6 @@ WalReceiverMain(void)
 	MemSet(&feedback_message, 0, sizeof(feedback_message));
 
 
-	if(access("pg_tmp/standby_mode", F_OK) != 0)
-	{
 		/* xp. start standby mode */
 		BlockLSNHash = init_block_lsn_hash();
 
@@ -299,16 +297,6 @@ WalReceiverMain(void)
 								   S_IRUSR | S_IWUSR);
 		close(fd);
 
-		/* fork the child process for reading block info file */
-		cid = fork();
-		if(cid == 0)
-		{
-			get_block_info();
-			return;
-		}
-		else if(cid < 0)
-			ereport(ERROR,
-					(errmsg("Cannot fork get block info process")));
 
 		/* change the mode information */
 		standby_mode = true;
@@ -320,7 +308,17 @@ WalReceiverMain(void)
 		ereport(WARNING,
 			(errmsg("%ld:%ld\tStartStandbyMode\tstandby_mode:%c\thigh_avail_mode:%c\tBlockLSNHash:%p",
 					tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0', BlockLSNHash)));
-	}
+	
+                /* fork the child process for reading block info file */
+        cid = fork();
+        if(cid == 0)
+        {
+                  get_block_info();
+                 return;
+        }
+        else if(cid < 0)
+                ereport(ERROR,
+                    (errmsg("Cannot fork get block info process")));
 
 
 	/* Loop until end-of-streaming or error */

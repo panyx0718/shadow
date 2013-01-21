@@ -679,6 +679,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	MdfdVec    *v;
 	struct timeval tv;
 	uint32 sleep_time = 100000;
+	int cnt = 0;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -732,9 +733,17 @@ retry:
 			if(!XLByteEQ(cur_lsn, lsn))
 			{
 				gettimeofday(&tv, NULL);
+				if(cnt == 10)
+				{
+                               		ereport(ERROR,
+                                        	(errmsg("CannotRead:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
+                                                	        tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
+                                                        	blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
+
+				}
 				ereport(TRACE_LEVEL,
-					(errmsg("WrongLSN:%ld.%ld:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
-							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
+					(errmsg("WrongLSN:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
+							tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
 				append_block_info(reln->smgr_rnode.node, forknum, blocknum, lsn, true);
 
