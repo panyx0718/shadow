@@ -678,7 +678,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	int			nbytes;
 	MdfdVec    *v;
 	struct timeval tv;
-	uint32 sleep_time = 100000;
+	long sleep_time = 100000;
 	int cnt = 0;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
@@ -735,10 +735,10 @@ retry:
 				gettimeofday(&tv, NULL);
 				if(cnt == 10)
 				{
-                               		ereport(ERROR,
-                                        	(errmsg("CannotRead:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
-                                                	        tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
-                                                        	blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
+					ereport(ERROR,
+					    (errmsg("CannotRead:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
+					     	        tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
+					              	blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
 
 				}
 				ereport(TRACE_LEVEL,
@@ -747,7 +747,8 @@ retry:
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
 				append_block_info(reln->smgr_rnode.node, forknum, blocknum, lsn, true);
 
-				usleep(sleep_time);
+				pg_usleep(sleep_time);
+				sleep_time *= 2;
 				goto retry;
 			}
 			else
@@ -1923,7 +1924,7 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 {
 	off_t		len;
 
-	if(high_avail_mode && LastBlockHash != NULL)
+	if(high_avail_mode && is_tracked(FilePathName(seg->mdfd_vfd)))
 	{
 		BlockNumber blocknum = get_last_block_hash(FilePathName(seg->mdfd_vfd), HASH_FIND);
 
