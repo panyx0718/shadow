@@ -1006,7 +1006,7 @@ get_block_info()
 				update_block_lsn(rnode, forknum, blocknum, lsn, HASH_ENTER_NULL);
 		}
 		else
-			pg_usleep(10000L);
+			usleep(10000);
 	}
 }
 
@@ -1017,8 +1017,10 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 	Page page;
 	SMgrRelation smgr;
 	bool found;
-	struct timeval tv;
 
+	ereport(WARNING,
+			(errmsg("FlushRequest:%u\t%u\t%u\t%u\t%u\t%u\t%u",
+			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff)));
 
 	if(xlog_apply == NULL)
 	{
@@ -1027,7 +1029,6 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 			ereport(WARNING,
 					(errmsg("Xlog Apply not inited by walreceiver")));
 	}
-/*
 	if(!XLByteLT(lsn, xlog_apply->apply))
 	{
 		ereport(WARNING,
@@ -1035,11 +1036,10 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 						xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff, lsn.xlogid, lsn.xrecoff)));
 		return;
 	}
-*/
-	gettimeofday(&tv, NULL);
+
 	ereport(WARNING,
-			(errmsg("FlushRequest:%ld%ld:%u\t%u\t%u\t%u\t%u\tapplied:%u.%u\trequested:%u.%u",
-			tv.tv_sec, tv.tv_usec, rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
+			(errmsg("FlushRequest:%u\t%u\t%u\t%u\t%u\tapplied:%u.%u\trequested:%u.%u",
+			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
 			xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff, lsn.xlogid, lsn.xrecoff)));
 
 	smgr = smgropen(rnode, InvalidBackendId);

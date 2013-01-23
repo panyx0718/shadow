@@ -728,7 +728,7 @@
 #define UINT64_FORMAT "%lu"
 
 /* Define to 1 to build with assertion checks. (--enable-cassert) */
-#define USE_ASSERT_CHECKING 1
+/* #undef USE_ASSERT_CHECKING */
 
 /* Define to 1 to build with Bonjour support. (--with-bonjour) */
 /* #undef USE_BONJOUR */

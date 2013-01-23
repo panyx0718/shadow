@@ -390,7 +390,7 @@ WalReceiverMain(void)
 			if(cid == 0)
 			{
 				get_block_info();
-				exit(1);
+				return;
 			}
 			else if(cid < 0)
 				ereport(ERROR,
