@@ -532,8 +532,8 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		if(is_tracked(filename))
 		{
 			int newblknum = blocknum % ((BlockNumber) RELSEG_SIZE) + 1;
-			modify_last_block_hash(filename, newblknum, HASH_ENTER_NULL);
 			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), HASH_ENTER_NULL);
+			modify_last_block_hash(filename, newblknum, HASH_ENTER_NULL);
 			//append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
 		}
 	}
@@ -678,7 +678,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	int			nbytes;
 	MdfdVec    *v;
 	struct timeval tv;
-	uint32 sleep_time = 100000;
+	long sleep_time = 100000;
 	int cnt = 0;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
@@ -733,7 +733,7 @@ retry:
 			if(!XLByteEQ(cur_lsn, lsn))
 			{
 				gettimeofday(&tv, NULL);
-				if(cnt == 10)
+				if(cnt == 8)
 				{
                                		ereport(ERROR,
                                         	(errmsg("CannotRead:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
@@ -747,7 +747,8 @@ retry:
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
 				append_block_info(reln->smgr_rnode.node, forknum, blocknum, lsn, true);
 
-				usleep(sleep_time);
+				pg_usleep(sleep_time);
+				sleep_time += sleep_time;
 				goto retry;
 			}
 			else
@@ -843,7 +844,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
 		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), HASH_ENTER_NULL);
-		append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
+		//append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
 	}
 	else if(standby_mode && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
@@ -857,18 +858,22 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		 * happen due to the buffer replacement algorithm. However, it might also
 		 * indicate the standby maintains different database physical structure(FATAL)
 		 */
+
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
 		if(lsn.xrecoff != 1)
 		{
 			ereport(WARNING,
-					(errmsg("WriteABlock:file:%s\tblocknum:%u\tforknum:%u\tprimaryLSN:%u.%u\tstandbyLSN:%u.%u",
-							FilePathName(v->mdfd_vfd), blocknum, forknum,
+					(errmsg("WriteABlock:%ld.%ld\tfile:%s\tblocknum:%u\tforknum:%u\tprimaryLSN:%u.%u\tstandbyLSN:%u.%u",
+							tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), blocknum, forknum,
 							lsn.xlogid, lsn.xrecoff, standby_lsn.xlogid, standby_lsn.xrecoff)));
 		}
 		else
 		{
 			ereport(WARNING,
-					(errmsg("Unexpected block written by the standby:file:%s\tblocknum:%u\tforknum:%u\tpageLSN:%u.%u",
-							FilePathName(v->mdfd_vfd), blocknum, forknum, standby_lsn.xlogid, standby_lsn.xrecoff)));
+					(errmsg("Unexpected block written:%ld.%ld\tfile:%s\tblocknum:%u\tforknum:%u\tpageLSN:%u.%u",
+						tv.tv_sec, tv.tv_usec,	
+						FilePathName(v->mdfd_vfd), blocknum, forknum, standby_lsn.xlogid, standby_lsn.xrecoff)));
 		}
 	}
 
@@ -1923,7 +1928,7 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 {
 	off_t		len;
 
-	if(high_avail_mode && LastBlockHash != NULL)
+	if(high_avail_mode && is_tracked(FilePathName(seg->mdfd_vfd)))
 	{
 		BlockNumber blocknum = get_last_block_hash(FilePathName(seg->mdfd_vfd), HASH_FIND);
 

@@ -902,6 +902,14 @@ update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
 									&found);
 	if(action == HASH_REMOVE)
 		return;
+
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        ereport(WARNING,
+                        (errmsg("UpdateLSN:%ld.%ld\t%u\t%u\t%u\t%u\t%u\tupdated:%u.%u",
+                        tv.tv_sec, tv.tv_usec, rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
+                        lsn.xlogid, lsn.xrecoff)));
+
 	if(val != NULL)
 	{
 		val->lsn = lsn;
@@ -1006,7 +1014,7 @@ get_block_info()
 				update_block_lsn(rnode, forknum, blocknum, lsn, HASH_ENTER_NULL);
 		}
 		else
-			usleep(10000);
+			pg_usleep(10000);
 	}
 }
 
@@ -1018,9 +1026,6 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 	SMgrRelation smgr;
 	bool found;
 
-	ereport(WARNING,
-			(errmsg("FlushRequest:%u\t%u\t%u\t%u\t%u\t%u\t%u",
-			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff)));
 
 	if(xlog_apply == NULL)
 	{
@@ -1032,14 +1037,16 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 	if(!XLByteLT(lsn, xlog_apply->apply))
 	{
 		ereport(WARNING,
-				(errmsg("FlushRequestDelay:applied:%u.%u\trequest:%u.%u",
+				(errmsg("WriteRequestDelay:applied:%u.%u\trequest:%u.%u",
 						xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff, lsn.xlogid, lsn.xrecoff)));
 		return;
 	}
-
+	
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
 	ereport(WARNING,
-			(errmsg("FlushRequest:%u\t%u\t%u\t%u\t%u\tapplied:%u.%u\trequested:%u.%u",
-			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
+			(errmsg("FlushRequest:%ld.%ld\t%u\t%u\t%u\t%u\t%u\tapplied:%u.%u\trequested:%u.%u",
+			tv.tv_sec, tv.tv_usec, rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
 			xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff, lsn.xlogid, lsn.xrecoff)));
 
 	smgr = smgropen(rnode, InvalidBackendId);
