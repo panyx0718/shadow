@@ -59,6 +59,7 @@
 #include "utils/guc.h"
 #include "utils/resowner.h"
 #include "replication/walsender.h"
+#include "storage/smgr.h"
 
 /*
  * We must leave some file descriptors free for system(), the dynamic loader,
@@ -1260,7 +1261,7 @@ FileWrite(File file, char *buffer, int amount)
 
 
 	filename = FilePathName(file);
-	if(high_avail_mode && is_tracked(filename))
+	if(is_primary_mode() && is_tracked(filename))
 	{
 		errno = 0;
 		returnCode = amount;
@@ -1444,22 +1445,10 @@ FileTruncate(File file, off_t offset)
 	if (returnCode < 0)
 		return returnCode;
 
-	if(!high_avail_mode)
-	{
-		int fd = BasicOpenFile("pg_tmp/high_avail_mode", O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
-		if(fd >= 0)
-		{
-			high_avail_mode = true;
-			close(fd);
-		}
-	}
+
 
 	filename = FilePathName(file);
-	if(high_avail_mode &&
-	   strstr(filename, "pg_tmp") == NULL &&
-			(strstr(filename, "base/") != NULL ||
-			 strstr(filename, "global/") != NULL
-			))
+	if(is_primary_mode() && is_tracked(filename))
 	{
 		returnCode = 0;
 #ifdef XP_TRACE_MD_WRITE
@@ -1472,7 +1461,7 @@ FileTruncate(File file, off_t offset)
 		returnCode = ftruncate(VfdCache[file].fd, offset);
 #ifdef XP_TRACE_MD_WRITE
 		ereport(TRACE_LEVEL,
-			(errmsg("nonblocktruncation:%s, high_avail_mode:%c", filename, high_avail_mode+'0')));
+			(errmsg("nonblocktruncation:%s, primary_mode:%c", filename, is_primary_mode()+'0')));
 #endif
 	}
 

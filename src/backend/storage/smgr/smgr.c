@@ -143,14 +143,6 @@ smgropen(RelFileNode rnode, BackendId backend)
 	SMgrRelation reln;
 	bool		found;
 
-	if(!high_avail_mode && !standby_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-		if(access("pg_tmp/standby_mode", F_OK) == 0)
-			standby_mode = true;
-	}
-
 	if (SMgrRelationHash == NULL)
 	{
 		/* First time through: initialize the hash table */
@@ -498,13 +490,6 @@ void
 smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		   char *buffer, bool skipFsync)
 {
-	if(!high_avail_mode && !standby_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-		if(access("pg_tmp/standby_mode", F_OK) == 0)
-			standby_mode = true;
-	}
 
 	(*(smgrsw[reln->smgr_which].smgr_extend)) (reln, forknum, blocknum,
 											   buffer, skipFsync);
@@ -516,13 +501,6 @@ smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 void
 smgrprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 {
-	if(!high_avail_mode && !standby_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-		if(access("pg_tmp/standby_mode", F_OK) == 0)
-			standby_mode = true;
-	}
 
 	(*(smgrsw[reln->smgr_which].smgr_prefetch)) (reln, forknum, blocknum);
 }
@@ -539,13 +517,6 @@ void
 smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		 char *buffer)
 {
-	if(!high_avail_mode && !standby_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-		if(access("pg_tmp/standby_mode", F_OK) == 0)
-			standby_mode = true;
-	}
 
 	(*(smgrsw[reln->smgr_which].smgr_read)) (reln, forknum, blocknum, buffer);
 }
@@ -569,13 +540,6 @@ void
 smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		  char *buffer, bool skipFsync)
 {
-	if(!high_avail_mode && !standby_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-		if(access("pg_tmp/standby_mode", F_OK) == 0)
-			standby_mode = true;
-	}
 
 	(*(smgrsw[reln->smgr_which].smgr_write)) (reln, forknum, blocknum,
 											  buffer, skipFsync);
@@ -588,13 +552,6 @@ smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 BlockNumber
 smgrnblocks(SMgrRelation reln, ForkNumber forknum)
 {
-	if(!high_avail_mode && !standby_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-		if(access("pg_tmp/standby_mode", F_OK) == 0)
-			standby_mode = true;
-	}
 
 	return (*(smgrsw[reln->smgr_which].smgr_nblocks)) (reln, forknum);
 }
@@ -608,13 +565,6 @@ smgrnblocks(SMgrRelation reln, ForkNumber forknum)
 void
 smgrtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 {
-	if(!high_avail_mode && !standby_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-		if(access("pg_tmp/standby_mode", F_OK) == 0)
-			standby_mode = true;
-	}
 	/*
 	 * Get rid of any buffers for the about-to-be-deleted blocks. bufmgr will
 	 * just drop them without bothering to write the contents.
@@ -692,13 +642,6 @@ smgrsync(void)
 {
 	int			i;
 
-	if(!high_avail_mode && !standby_mode)
-	{
-		if(access("pg_tmp/high_avail_mode", F_OK) == 0)
-			high_avail_mode = true;
-		if(access("pg_tmp/standby_mode", F_OK) == 0)
-			standby_mode = true;
-	}
 
 	for (i = 0; i < NSmgr; i++)
 	{
@@ -748,6 +691,35 @@ AtEOXact_SMgr(void)
 	}
 }
 
+bool
+is_primary_mode()
+{
+	int res = access("pg_tmp/primary_mode", F_OK);
+	//ereport(TRACE_LEVEL,
+		//	(errmsg("Primary Mode: %d", res)));
+
+	if(res == 0)
+	{
+		return true;
+	}
+	else
+		return false;
+}
+
+bool
+is_standby_mode()
+{
+	int res = access("pg_tmp/standby_mode", F_OK);
+	//ereport(TRACE_LEVEL,
+			//(errmsg("Standby Mode: %d", res)));
+
+	if(res == 0)
+	{
+		return true;
+	}
+	else
+		return false;
+}
 
 bool
 is_tracked(char *filename)
@@ -902,14 +874,14 @@ update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
 									&found);
 	if(action == HASH_REMOVE)
 		return;
-
+/*
         struct timeval tv;
         gettimeofday(&tv, NULL);
         ereport(WARNING,
                         (errmsg("UpdateLSN:%ld.%ld\t%u\t%u\t%u\t%u\t%u\tupdated:%u.%u",
                         tv.tv_sec, tv.tv_usec, rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
                         lsn.xlogid, lsn.xrecoff)));
-
+*/
 	if(val != NULL)
 	{
 		val->lsn = lsn;
@@ -969,6 +941,8 @@ append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, X
 
 void shutdownHandler()
 {
+	if(BlockInfoFile != NULL)
+		fclose(BlockInfoFile);
 	exit(1);
 }
 
@@ -998,7 +972,7 @@ get_block_info()
 
 	while(1)
 	{
-		if (!PostmasterIsAlive())
+		if (getppid() == 1)
 			exit(1);
 
 		ret = fscanf(BlockInfoFile, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
@@ -1064,4 +1038,13 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 	UnlockReleaseBuffer(buf);
 }
 
+void
+clean_standby_resources()
+{
+	ereport(WARNING,
+			(errmsg("Clean up standby resources")));
+	unlink("pg_tmp/standby_mode");
 
+	if(BlockLSNHash != NULL)
+		hash_destroy(BlockLSNHash);
+}

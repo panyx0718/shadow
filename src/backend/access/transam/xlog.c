@@ -5592,7 +5592,6 @@ readRecoveryCommandFile(void)
 								"standby_mode")));
 			ereport(DEBUG2,
 					(errmsg_internal("standby_mode = '%s'", item->value)));
-			standby_mode = StandbyMode;
 		}
 		else if (strcmp(item->name, "primary_conninfo") == 0)
 		{
@@ -6826,13 +6825,15 @@ StartupXLOG(void)
 	 * subsequent records if it's still alive when we start writing WAL.
 	 */
 	ShutdownWalRcv();
-
 	/*
 	 * We don't need the latch anymore. It's not strictly necessary to disown
 	 * it, but let's do it for the sake of tidiness.
 	 */
 	if (StandbyMode)
+	{
 		DisownLatch(&XLogCtl->recoveryWakeupLatch);
+		clean_standby_resources();
+	}
 
 	/*
 	 * We are now done reading the xlog from stream. Turn off streaming

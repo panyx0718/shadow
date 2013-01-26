@@ -145,6 +145,7 @@ ProcessWalRcvInterrupts(void)
 
 	if (got_SIGTERM)
 	{
+		kill(cid, SIGTERM);
 		WalRcvImmediateInterruptOK = false;
 		ereport(FATAL,
 				(errcode(ERRCODE_ADMIN_SHUTDOWN),
@@ -298,23 +299,20 @@ WalReceiverMain(void)
 		close(fd);
 
 
-		/* change the mode information */
-		standby_mode = true;
-		high_avail_mode = false;
 
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		xp_stack_trace(TRACE_SIZE, tv);
 		ereport(WARNING,
-			(errmsg("%ld:%ld\tStartStandbyMode\tstandby_mode:%c\thigh_avail_mode:%c\tBlockLSNHash:%p",
-					tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0', BlockLSNHash)));
+			(errmsg("%ld:%ld\tStartStandbyMode\tstandby_mode:%c\tprimary_mode:%c\tBlockLSNHash:%p",
+					tv.tv_sec, tv.tv_usec, is_standby_mode()+'0', is_primary_mode()+'0', BlockLSNHash)));
 	
                 /* fork the child process for reading block info file */
         cid = fork();
         if(cid == 0)
         {
-                  get_block_info();
-                 return;
+        	get_block_info();
+            return;
         }
         else if(cid < 0)
                 ereport(ERROR,
@@ -437,7 +435,7 @@ WalRcvShutdownHandler(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	got_SIGTERM = true;
-	kill(cid, 9);
+
 	/* Don't joggle the elbow of proc_exit */
 	if (!proc_exit_inprogress && WalRcvImmediateInterruptOK)
 		ProcessWalRcvInterrupts();
@@ -455,7 +453,7 @@ static void
 WalRcvQuickDieHandler(SIGNAL_ARGS)
 {
 	PG_SETMASK(&BlockSig);
-	kill(cid, 9);
+	kill(cid, SIGTERM);
 	/*
 	 * We DO NOT want to run proc_exit() callbacks -- we're here because
 	 * shared memory may be corrupted, so we don't want to try to clean up our

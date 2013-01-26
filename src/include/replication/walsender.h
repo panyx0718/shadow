@@ -27,9 +27,6 @@ extern volatile sig_atomic_t walsender_ready_to_stop;
 extern int	max_wal_senders;
 extern int	replication_timeout;
 
-extern bool high_avail_mode;
-extern bool standby_mode;
-
 extern int	WalSenderMain(void);
 extern void WalSndSignals(void);
 extern Size WalSndShmemSize(void);

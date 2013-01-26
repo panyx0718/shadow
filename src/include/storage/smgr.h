@@ -155,6 +155,8 @@ extern void smgrsync(void);
 extern void smgrpostckpt(void);
 extern void AtEOXact_SMgr(void);
 
+extern bool is_primary_mode();
+extern bool is_primary_mode();
 bool is_tracked(char *filename);
 
 extern HTAB* init_last_block_hash();
@@ -169,7 +171,7 @@ extern XLogRecPtr get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, B
 extern void append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush);
 extern void get_block_info();
 extern void flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn);
-
+extern void clean_standby_resources();
 extern Size BlockLSNSize();
 /* internals: move me elsewhere -- ay 7/94 */
 

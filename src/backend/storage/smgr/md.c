@@ -526,7 +526,7 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						nbytes, BLCKSZ, blocknum),
 				 errhint("Check free disk space.")));
 	}
-	if(high_avail_mode)
+	if(is_primary_mode())
 	{
 		char *filename = FilePathName(v->mdfd_vfd);
 		if(is_tracked(filename))
@@ -547,7 +547,7 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	XLogRecPtr ptr = PageGetLSN(buffer);
 	ereport(TRACE_LEVEL,
 		(errmsg("%ld.%ld:\tmode:%c.%c\tWRITE:mdextend:\tfile:%s\tforknum:%u\tblocknum:%u\tpageLSN:%u:%u\trnode:%u",
-				tv.tv_sec, tv.tv_usec, high_avail_mode+'0', standby_mode+'0',
+				tv.tv_sec, tv.tv_usec, is_primary_mode()+'0', is_standby_mode()+'0',
 				FilePathName(v->mdfd_vfd), forknum, blocknum, ptr.xlogid, ptr.xrecoff,
 				reln->smgr_rnode.node.relNode)));
 #endif
@@ -702,7 +702,7 @@ retry:
 
 	XLogRecPtr cur_lsn;
 	XLogRecPtr lsn;
-	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
 		lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
 		if(lsn.xrecoff == 0)
@@ -722,7 +722,7 @@ retry:
 		nbytes = FileRead(v->mdfd_vfd, buffer, BLCKSZ);
 
 
-	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
 
 		/* neither unwritten nor empty */
@@ -841,12 +841,12 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
-	if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
 		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), HASH_ENTER_NULL);
 		//append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
 	}
-	else if(standby_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+	else if(is_standby_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
 		XLogRecPtr lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
 		XLogRecPtr standby_lsn = PageGetLSN(buffer);
@@ -1034,7 +1034,7 @@ mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 						 errmsg("could not truncate file \"%s\": %m",
 								FilePathName(v->mdfd_vfd))));
 
-			if(high_avail_mode && is_tracked(FilePathName(v->mdfd_vfd)))
+			if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 			{
 				modify_last_block_hash(FilePathName(v->mdfd_vfd),
 										(BlockNumber)0,
@@ -1066,7 +1066,7 @@ mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 					errmsg("could not truncate file \"%s\" to %u blocks: %m",
 						   FilePathName(v->mdfd_vfd),
 						   nblocks)));
-			if(high_avail_mode)
+			if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 			{
 				modify_last_block_hash(FilePathName(v->mdfd_vfd),
 										(BlockNumber)lastsegblocks,
@@ -1928,7 +1928,7 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 {
 	off_t		len;
 
-	if(high_avail_mode && is_tracked(FilePathName(seg->mdfd_vfd)))
+	if(is_primary_mode() && is_tracked(FilePathName(seg->mdfd_vfd)))
 	{
 		BlockNumber blocknum = get_last_block_hash(FilePathName(seg->mdfd_vfd), HASH_FIND);
 

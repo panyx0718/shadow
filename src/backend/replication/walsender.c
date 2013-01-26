@@ -83,8 +83,6 @@ int			max_wal_senders = 0;	/* the maximum number of concurrent walsenders */
 int			replication_timeout = 60 * 1000;	/* maximum time to send one
 
 												 * WAL data message */
-bool high_avail_mode = false;
-bool standby_mode = false;
 
 /*
  * These variables are used similarly to openLogFile/Id/Seg/Off,
@@ -738,14 +736,14 @@ WalSndLoop(void)
 
 
 
-	if(access("pg_tmp/high_avail_mode", F_OK) != 0)
+	if(access("pg_tmp/primary_mode", F_OK) != 0)
 	{
 		/* xp. start high avail mode */
 		LastBlockHash = init_last_block_hash();
 		BlockLSNHash = init_block_lsn_hash();
 
 		/* primary trigger file for other process */
-		int fd = BasicOpenFile("pg_tmp/high_avail_mode",
+		int fd = BasicOpenFile("pg_tmp/primary_mode",
 							   O_WRONLY | O_CREAT | PG_BINARY,
 							   S_IRUSR | S_IWUSR);
 		close(fd);
@@ -754,15 +752,12 @@ WalSndLoop(void)
 		BlockInfoFile = fopen(BlockInfo, "w");
 		fclose(BlockInfoFile);
 
-		high_avail_mode = true;
-		standby_mode = false;
-
 		struct	timeval	tv;
 		gettimeofday(&tv, NULL);
 		xp_stack_trace(TRACE_SIZE, tv);
 		ereport(WARNING,
-				(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\thigh_avail_mode=%c\tLastBlockHash:%p\tBlockLSNHash:%p",
-						tv.tv_sec, tv.tv_usec, standby_mode+'0', high_avail_mode+'0', LastBlockHash, BlockLSNHash)));
+				(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\tprimary_mode:%c\tLastBlockHash:%p\tBlockLSNHash:%p",
+						tv.tv_sec, tv.tv_usec, is_standby_mode()+'0', is_primary_mode()+'0', LastBlockHash, BlockLSNHash)));
 	}
 
 
