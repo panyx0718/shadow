@@ -15,6 +15,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include <unistd.h>
 #include "postgres.h"
 
 #include "commands/tablespace.h"

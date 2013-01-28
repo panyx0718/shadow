@@ -23,7 +23,7 @@ postgres -D $WORKDIR/pdata > $WORKDIR/plog 2>&1 &
 sleep 2
 
 echo "**********init backup***********"
-./initbackup.sh || exit 1
+./initbackup.sh 5432 pdata 127.0.0.1 sdata || exit 1
 postgres -D $WORKDIR/sdata > $WORKDIR/slog 2>&1 &
 sleep 2
 
