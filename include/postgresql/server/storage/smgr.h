@@ -127,6 +127,7 @@ extern HTAB *LastBlockHash;
 extern HTAB *BlockLSNHash;
 extern FILE *BlockInfoFile;
 extern	XLogApply xlog_apply;
+extern bool sync_write;
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(RelFileNode rnode, BackendId backend);
@@ -157,7 +158,7 @@ extern void AtEOXact_SMgr(void);
 
 extern bool is_primary_mode();
 extern bool is_standby_mode();
-bool is_tracked(char *filename);
+extern bool is_tracked(char *filename);
 
 extern HTAB* init_last_block_hash();
 extern void modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action);

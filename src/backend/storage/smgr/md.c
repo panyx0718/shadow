@@ -735,10 +735,10 @@ retry:
 				gettimeofday(&tv, NULL);
 				if(cnt == 8)
 				{
-                               		ereport(ERROR,
-                                        	(errmsg("CannotRead:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
-                                                	        tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
-                                                        	blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
+					ereport(ERROR,
+                            (errmsg("CannotRead:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
+                                     tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
+                                     blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
 
 				}
 				ereport(TRACE_LEVEL,
@@ -915,8 +915,15 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				reln->smgr_rnode.node.relNode)));
 #endif
 
-	if (!skipFsync && !SmgrIsTemp(reln))
+	if(sync_write)
+	{
+		if(FileSync(v->mdfd_vfd) < 0)
+			ereport(TRACE_LEVEL,
+					(errmsg("Fsync failed")));
+	}
+	else if (!skipFsync && !SmgrIsTemp(reln))
 		register_dirty_segment(reln, forknum, v);
+
 }
 
 /*
@@ -1509,6 +1516,8 @@ register_dirty_segment(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 	}
 	else
 	{
+
+
 		if (ForwardFsyncRequest(reln->smgr_rnode.node, forknum, seg->mdfd_segno))
 			return;				/* passed it off successfully */
 

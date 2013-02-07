@@ -88,6 +88,7 @@ HTAB *LastBlockHash = NULL;
 HTAB *BlockLSNHash = NULL;
 FILE *BlockInfoFile = NULL;
 XLogApply xlog_apply = NULL;
+bool sync_write = false;
 
 /* local function prototypes */
 static void smgrshutdown(int code, Datum arg);
@@ -769,7 +770,7 @@ modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action)
 	{
 		LastBlockHash = init_last_block_hash();
 		ereport(TRACE_LEVEL,
-				(errmsg("LastBlockHash:%p", LastBlockHash)));
+				(errmsg("modify_last_block_hash:LastBlockHash:%p", LastBlockHash)));
 	}
 
 	strcpy(rel_name.filename, filename);
@@ -803,7 +804,7 @@ get_last_block_hash(char *filename, HASHACTION action)
 	{
 		LastBlockHash = init_last_block_hash();
 		ereport(TRACE_LEVEL,
-				(errmsg("LastBlockHash:%p", LastBlockHash)));
+				(errmsg("get_last_block_hash: LastBlockHash:%p", LastBlockHash)));
 		return InvalidBlockNumber;
 	}
 
@@ -925,19 +926,23 @@ get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
 void
 append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush)
 {
-	if(BlockInfoFile == NULL)
+	static int fd = -1;
+	char buf[128];
+	int len = 0;
+
+	if(fd < 0)
 	{
-		if((BlockInfoFile = fopen(BlockInfo, "a")) == NULL)
+		if((fd = open(BlockInfo, O_WRONLY|O_APPEND|O_SYNC)) < 0)
 		{
 			ereport(ERROR,
-				(errmsg("Cannot open block info file")));
+				(errmsg("Cannot open block info file for write")));
 			return;
 		}
 	}
-	fseek(BlockInfoFile, 0, SEEK_END);
-	fprintf(BlockInfoFile, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
+
+	len = snprintf(buf, sizeof(buf), "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
 			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff, flush+'0');
-	fflush(BlockInfoFile);
+	write(fd, buf, len);
 }
 
 void shutdownHandler()
@@ -965,7 +970,7 @@ get_block_info()
 		if((BlockInfoFile = fopen(BlockInfo, "r")) == NULL)
 		{
 			ereport(WARNING,
-				(errmsg("Cannot open block info file")));
+				(errmsg("Cannot open block info file for read")));
 			sleep(1);
 		}
 	}
@@ -1034,8 +1039,9 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 
 	page = (Page) BufferGetPage(buf);
 	PageSetLSN(page, lsn);
+	sync_write = true;
 	smgrwrite(smgr, forknum, blocknum, (char*)page, false);
-
+	sync_write = false;
 	UnlockReleaseBuffer(buf);
 }
 

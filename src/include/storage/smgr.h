@@ -127,6 +127,7 @@ extern HTAB *LastBlockHash;
 extern HTAB *BlockLSNHash;
 extern FILE *BlockInfoFile;
 extern	XLogApply xlog_apply;
+extern bool sync_write;
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(RelFileNode rnode, BackendId backend);
