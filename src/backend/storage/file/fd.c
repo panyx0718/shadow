@@ -1345,11 +1345,7 @@ FileSync(File file)
 
 	returnCode = FileAccess(file);
 	if (returnCode < 0)
-	{
-		ereport(WARNING,
-				(errmsg("file access fail")));
 		return returnCode;
-	}
 
 
 	return pg_fsync(VfdCache[file].fd);

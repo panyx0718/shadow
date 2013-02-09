@@ -287,8 +287,6 @@ WalReceiverMain(void)
 
 
 		/* xp. start standby mode */
-		BlockLSNHash = init_block_lsn_hash();
-
 		bool found;
 		xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
 
@@ -298,14 +296,12 @@ WalReceiverMain(void)
 								   S_IRUSR | S_IWUSR);
 		close(fd);
 
-
-
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		xp_stack_trace(TRACE_SIZE, tv);
 		ereport(WARNING,
-			(errmsg("%ld:%ld\tStartStandbyMode\tstandby_mode:%c\tprimary_mode:%c\tBlockLSNHash:%p",
-					tv.tv_sec, tv.tv_usec, is_standby_mode()+'0', is_primary_mode()+'0', BlockLSNHash)));
+			(errmsg("%ld:%ld\tStartStandbyMode\tstandby_mode:%c\tprimary_mode:%c\t",
+					tv.tv_sec, tv.tv_usec, is_standby_mode()+'0', is_primary_mode()+'0')));
 	
                 /* fork the child process for reading block info file */
         cid = fork();

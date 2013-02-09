@@ -29,6 +29,7 @@
 #include "storage/pmsignal.h"
 #include "storage/shmem.h"
 #include "utils/timestamp.h"
+#include "storage/smgr.h"
 
 WalRcvData *WalRcv = NULL;
 
@@ -45,7 +46,7 @@ WalRcvShmemSize(void)
 	Size		size = 0;
 
 	size = add_size(size, sizeof(WalRcvData));
-
+	size = add_size(size, sizeof(XLogApplyData));
 	return size;
 }
 

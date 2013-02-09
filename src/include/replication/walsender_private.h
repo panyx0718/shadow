@@ -90,6 +90,9 @@ typedef struct
 	bool		sync_standbys_defined;
 
 	WalSnd		walsnds[1];		/* VARIABLE LENGTH ARRAY */
+
+	char		standby_addr[130];
+
 } WalSndCtlData;
 
 extern WalSndCtlData *WalSndCtl;

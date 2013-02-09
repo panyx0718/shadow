@@ -739,6 +739,8 @@ WalSndLoop(void)
 	if(access("pg_tmp/primary_mode", F_OK) != 0)
 	{
 		/* xp. start high avail mode */
+		strcpy(WalSndCtl->standby_addr, MyProcPort->remote_host);
+
 		LastBlockHash = init_last_block_hash();
 		BlockLSNHash = init_block_lsn_hash();
 
@@ -756,8 +758,9 @@ WalSndLoop(void)
 		gettimeofday(&tv, NULL);
 		xp_stack_trace(TRACE_SIZE, tv);
 		ereport(WARNING,
-				(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\tprimary_mode:%c\tLastBlockHash:%p\tBlockLSNHash:%p",
-						tv.tv_sec, tv.tv_usec, is_standby_mode()+'0', is_primary_mode()+'0', LastBlockHash, BlockLSNHash)));
+				(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\tprimary_mode:%c\tLastBlockHash:%p\tBlockLSNHash:%p\tStandby:%s",
+						tv.tv_sec, tv.tv_usec, is_standby_mode()+'0', is_primary_mode()+'0',
+						LastBlockHash, BlockLSNHash, WalSndCtl->standby_addr)));
 	}
 
 
@@ -1449,7 +1452,7 @@ WalSndShmemSize(void)
 
 	size = offsetof(WalSndCtlData, walsnds);
 	size = add_size(size, mul_size(max_wal_senders, sizeof(WalSnd)));
-
+	size = add_size(size, sizeof(130));
 	return size;
 }
 

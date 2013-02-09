@@ -26,6 +26,9 @@
 #include "utils/inval.h"
 #include "replication/walsender.h"
 #include "catalog/pg_class.h"
+#include "libpq/libpq.h"
+#include "miscadmin.h"
+#include "replication/walsender_private.h"
 
 /*
  * This struct of function pointers defines the API between smgr.c and
@@ -64,6 +67,15 @@ typedef struct f_smgr
 	void		(*smgr_post_ckpt) (void);		/* may be NULL */
 } f_smgr;
 
+typedef struct FlushRequest
+{
+	RelFileNode rnode;
+	ForkNumber	forknum;
+	BlockNumber	blocknum;
+	XLogRecPtr	lsn;
+	char	flush;
+}FlushRequest;
+static int req_len = sizeof(FlushRequest);
 
 static const f_smgr smgrsw[] = {
 	/* magnetic disk */
@@ -80,6 +92,7 @@ static const int NSmgr = lengthof(smgrsw);
  * Each backend has a hashtable that stores all extant SMgrRelation objects.
  * In addition, "unowned" SMgrRelation objects are chained together in a list.
  */
+#define flush_req_port 3552
 static HTAB *SMgrRelationHash = NULL;
 
 static SMgrRelation first_unowned_reln = NULL;
@@ -701,9 +714,7 @@ is_primary_mode()
 		//	(errmsg("Primary Mode: %d", res)));
 
 	if(res == 0)
-	{
 		return true;
-	}
 	else
 		return false;
 }
@@ -824,6 +835,7 @@ Size BlockLSNSize()
 {
 	Size size = 0;
 	size = mul_size(BLOCKLSNHASHSIZE*2, sizeof(BlockLSNData));
+	//size = add_size(size, sizeof(PrimaryData));
 	return size;
 }
 
@@ -926,23 +938,48 @@ get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
 void
 append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush)
 {
-	static int fd = -1;
-	char buf[128];
-	int len = 0;
+	static int s = -1;
+	static struct sockaddr_in addr;
+	FlushRequest request;
 
-	if(fd < 0)
+
+	if(s < 0)
 	{
-		if((fd = open(BlockInfo, O_WRONLY|O_APPEND|O_SYNC)) < 0)
-		{
-			ereport(ERROR,
-				(errmsg("Cannot open block info file for write")));
-			return;
-		}
-	}
+		if((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+			ereport(FATAL,
+					(errmsg("Unable to create socket")));
 
-	len = snprintf(buf, sizeof(buf), "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
-			rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff, flush+'0');
-	write(fd, buf, len);
+		memset(&addr, 0, sizeof(addr));
+		addr.sin_family = AF_INET;
+		addr.sin_port = htons(flush_req_port);
+
+		if(WalSndCtl == NULL)
+		{
+			ereport(WARNING,
+					(errmsg("Attach to WalSndCtl")));
+			bool found;
+			WalSndCtl = (WalSndCtlData *)
+				ShmemInitStruct("Wal Sender Ctl", WalSndShmemSize(), &found);
+
+			if(!found || WalSndCtl == NULL)
+				ereport(WARNING,
+						(errmsg("WalSndCtl not initiated")));
+		}
+		ereport(WARNING,
+				(errmsg("Init read sync connection: %s", WalSndCtl->standby_addr)));
+		if(inet_aton(WalSndCtl->standby_addr, &addr.sin_addr) == 0)
+			ereport(FATAL,
+					(errmsg("Unable to inet_aton")));
+	}
+	request.rnode = rnode;
+	request.forknum = forknum;
+	request.blocknum = blocknum;
+	request.lsn = lsn;
+	request.flush = flush+'0';
+
+	if(sendto(s, &request, req_len, 0, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+		ereport(WARNING,
+				(errmsg("Unable to send")));
 }
 
 void shutdownHandler()
@@ -952,49 +989,152 @@ void shutdownHandler()
 	exit(1);
 }
 
+
+#define request_his_size 8
+static FlushRequest* reqs[request_his_size];
+static int pos = -1;
+
+bool
+is_requested(FlushRequest aReq)
+{
+	int  i;
+
+	if(pos == -1)
+		return false;
+
+	for(i = 0; i < request_his_size; i++)
+	{
+		if(reqs[i] == NULL)
+			continue;
+
+		if(aReq.blocknum == reqs[i]->blocknum &&
+			aReq.forknum == reqs[i]->forknum &&
+			aReq.lsn.xrecoff == reqs[i]->lsn.xrecoff &&
+			aReq.rnode.relNode == reqs[i]->rnode.relNode &&
+			aReq.rnode.spcNode == reqs[i]->rnode.spcNode &&
+			aReq.rnode.dbNode == reqs[i]->rnode.dbNode &&
+			aReq.flush == reqs[i]->flush)
+		{
+			ereport(WARNING,
+					(errmsg("Requested:%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
+							aReq.rnode.spcNode, aReq.rnode.dbNode, aReq.rnode.relNode,
+							aReq.forknum, aReq.blocknum, aReq.lsn.xlogid, aReq.lsn.xrecoff, aReq.flush)));
+			return true;
+		}
+
+	}
+	return false;
+}
+
+void
+add_requested(FlushRequest aReq)
+{
+	int i;
+	FlushRequest* new_req;
+
+	if(pos == -1)
+		for(i = 0; i < request_his_size; i++)
+			reqs[i] = NULL;
+
+	if(++pos % request_his_size == 0)
+		pos = 0;
+
+	new_req = (FlushRequest *)malloc(sizeof(FlushRequest));
+	memcpy(new_req, &aReq, sizeof(FlushRequest));
+
+	if(reqs[pos] != NULL)
+		free(reqs[pos]);
+	reqs[pos] = new_req;
+}
+
+
 void
 get_block_info()
 {
-	RelFileNode rnode;
-	ForkNumber forknum;
-	BlockNumber blocknum;
-	XLogRecPtr lsn;
-	bool flush;
-	int ret;
+	struct sockaddr_in server_addr;
+	int s;
+	ssize_t ret;
+	fd_set read_set;
+	struct timeval timer;
+	FlushRequest request;
 
 	pqsignal(SIGTERM, shutdownHandler);	/* request shutdown */
 	pqsignal(SIGQUIT, shutdownHandler);	/* hard crash time */
 
-	while(BlockInfoFile == NULL)
+	/* init the xlog_apply, monitor how far the standby has replayed */
+	if(xlog_apply == NULL)
 	{
-		if((BlockInfoFile = fopen(BlockInfo, "r")) == NULL)
-		{
+		bool found;
+		xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
+		if(!found)
 			ereport(WARNING,
-				(errmsg("Cannot open block info file for read")));
-			sleep(1);
-		}
+					(errmsg("Xlog Apply not inited by walreceiver")));
 	}
-	fseek(BlockInfoFile, 0, SEEK_END);
 
+	/* init server socket */
+	if((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+		ereport(FATAL,
+				(errmsg("Unable to create socket")));
+
+	memset(&server_addr, 0, sizeof(server_addr));
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_port = htons(flush_req_port);
+	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	if(bind(s, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+		ereport(FATAL,
+				(errmsg("Unable to bind")));
+
+	FD_ZERO(&read_set);
+	FD_SET(s, &read_set);
+	timer.tv_sec = 1;
+	timer.tv_usec = 0;
+
+	/* start the loop to receive primary request */
 	while(1)
 	{
+		/* if the primary is dead */
 		if (getppid() == 1)
 			exit(1);
 
-		ret = fscanf(BlockInfoFile, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
-				&rnode.spcNode, &rnode.dbNode, &rnode.relNode, &forknum, &blocknum, &lsn.xlogid, &lsn.xrecoff, &flush);
-		if(ret > 0)
+		ret = select(s+1, &read_set, NULL, NULL, &timer);
+		if(ret < 0)
 		{
-			ereport(WARNING,
-					(errmsg("PrimaryPosition:%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
-					rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum, lsn.xlogid, lsn.xrecoff, flush)));
-			if(flush-'0' != 0)
-				flush_block(rnode, forknum, blocknum, lsn);
-			else
-				update_block_lsn(rnode, forknum, blocknum, lsn, HASH_ENTER_NULL);
+			close(s);
+			exit(1);
 		}
-		else
-			pg_usleep(10000);
+
+		FD_ZERO(&read_set);
+		FD_SET(s, &read_set);
+		timer.tv_sec = 1;
+		timer.tv_usec = 0;
+
+		if(ret == 0)
+			continue;
+
+		/* receive a request */
+		ret = recvfrom(s, &request, req_len, 0, NULL, NULL);
+		if(ret == req_len)
+		{
+			/* if it was recently requested and flushed */
+			if(is_requested(request))
+				continue;
+			/* if the standby has not replayed that far */
+			if(!XLByteLT(request.lsn, xlog_apply->apply))
+			{
+				ereport(WARNING,
+						(errmsg("WriteRequestDelay:applied:%u.%u\trequest:%u.%u",
+								xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff,
+								request.lsn.xlogid, request.lsn.xrecoff)));
+				continue;
+			}
+
+			if(request.flush-'0' != 0)
+			{
+				flush_block(request.rnode, request.forknum, request.blocknum, request.lsn);
+				add_requested(request);
+			}
+		}
 	}
 }
 
@@ -1005,24 +1145,8 @@ flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRec
 	Page page;
 	SMgrRelation smgr;
 	bool found;
-
-
-	if(xlog_apply == NULL)
-	{
-		xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
-		if(found)
-			ereport(WARNING,
-					(errmsg("Xlog Apply not inited by walreceiver")));
-	}
-	if(!XLByteLT(lsn, xlog_apply->apply))
-	{
-		ereport(WARNING,
-				(errmsg("WriteRequestDelay:applied:%u.%u\trequest:%u.%u",
-						xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff, lsn.xlogid, lsn.xrecoff)));
-		return;
-	}
-	
 	struct timeval tv;
+
 	gettimeofday(&tv, NULL);
 	ereport(WARNING,
 			(errmsg("FlushRequest:%ld.%ld\t%u\t%u\t%u\t%u\t%u\tapplied:%u.%u\trequested:%u.%u",
@@ -1051,7 +1175,4 @@ clean_standby_resources()
 	ereport(WARNING,
 			(errmsg("Clean up standby resources")));
 	unlink("pg_tmp/standby_mode");
-
-	if(BlockLSNHash != NULL)
-		hash_destroy(BlockLSNHash);
 }

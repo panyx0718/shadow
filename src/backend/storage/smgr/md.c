@@ -733,13 +733,12 @@ retry:
 			if(!XLByteEQ(cur_lsn, lsn))
 			{
 				gettimeofday(&tv, NULL);
-				if(cnt == 8)
+				if(cnt == 6)
 				{
 					ereport(ERROR,
                             (errmsg("CannotRead:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
                                      tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
                                      blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
-
 				}
 				ereport(TRACE_LEVEL,
 					(errmsg("WrongLSN:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
@@ -748,7 +747,8 @@ retry:
 				append_block_info(reln->smgr_rnode.node, forknum, blocknum, lsn, true);
 
 				pg_usleep(sleep_time);
-				sleep_time += sleep_time;
+				if(sleep_time <= 1000000)
+					sleep_time = sleep_time * 4;
 				goto retry;
 			}
 			else
@@ -848,33 +848,14 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	}
 	else if(is_standby_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
-		XLogRecPtr lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
 		XLogRecPtr standby_lsn = PageGetLSN(buffer);
-		/*
-		 * Here, the xlogid should not be 0, because it only writes what the primary wants to write.
-		 * Hence, if this problem happens, there are two possible reasons:
-		 * 1.The entry in the block info file is not read yet.
-		 * 2.The standby write something not expected by the primary. This may
-		 * happen due to the buffer replacement algorithm. However, it might also
-		 * indicate the standby maintains different database physical structure(FATAL)
-		 */
-
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
-		if(lsn.xrecoff != 1)
-		{
-			ereport(WARNING,
-					(errmsg("WriteABlock:%ld.%ld\tfile:%s\tblocknum:%u\tforknum:%u\tprimaryLSN:%u.%u\tstandbyLSN:%u.%u",
-							tv.tv_sec, tv.tv_usec, FilePathName(v->mdfd_vfd), blocknum, forknum,
-							lsn.xlogid, lsn.xrecoff, standby_lsn.xlogid, standby_lsn.xrecoff)));
-		}
-		else
-		{
-			ereport(WARNING,
-					(errmsg("Unexpected block written:%ld.%ld\tfile:%s\tblocknum:%u\tforknum:%u\tpageLSN:%u.%u",
-						tv.tv_sec, tv.tv_usec,	
-						FilePathName(v->mdfd_vfd), blocknum, forknum, standby_lsn.xlogid, standby_lsn.xrecoff)));
-		}
+
+		ereport(WARNING,
+				(errmsg("WriteABlock:%ld.%ld\tfile:%s\tblocknum:%u\tforknum:%u\tpageLSN:%u.%u",
+					tv.tv_sec, tv.tv_usec,
+					FilePathName(v->mdfd_vfd), blocknum, forknum, standby_lsn.xlogid, standby_lsn.xrecoff)));
 	}
 
 	nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ);
