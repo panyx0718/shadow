@@ -756,7 +756,6 @@ WalSndLoop(void)
 
 		struct	timeval	tv;
 		gettimeofday(&tv, NULL);
-		xp_stack_trace(TRACE_SIZE, tv);
 		ereport(WARNING,
 				(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\tprimary_mode:%c\tLastBlockHash:%p\tBlockLSNHash:%p\tStandby:%s",
 						tv.tv_sec, tv.tv_usec, is_standby_mode()+'0', is_primary_mode()+'0',
