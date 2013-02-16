@@ -57,15 +57,23 @@ WalRcvShmemInit(void)
 	bool		found;
 
 	WalRcv = (WalRcvData *)
-		ShmemInitStruct("Wal Receiver Ctl", WalRcvShmemSize(), &found);
+		ShmemInitStruct("Wal Receiver Ctl", sizeof(WalRcvData), &found);
 
 	if (!found)
 	{
 		/* First time through, so initialize */
-		MemSet(WalRcv, 0, WalRcvShmemSize());
+		MemSet(WalRcv, 0, sizeof(WalRcvData));
 		WalRcv->walRcvState = WALRCV_STOPPED;
 		SpinLockInit(&WalRcv->mutex);
 	}
+
+	xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
+	if(!found)
+	{
+		xlog_apply->apply.xlogid = 0;
+		xlog_apply->apply.xrecoff = 0;
+	}
+
 }
 
 /* Is walreceiver in progress (or starting up)? */

@@ -836,10 +836,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						blocknum, FilePathName(v->mdfd_vfd))));
 
 	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
-	{
 		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), HASH_ENTER_NULL);
-		//append_block_info(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), false);
-	}
 	else if(is_standby_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
 		XLogRecPtr standby_lsn = PageGetLSN(buffer);

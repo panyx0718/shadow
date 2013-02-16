@@ -750,10 +750,6 @@ WalSndLoop(void)
 							   S_IRUSR | S_IWUSR);
 		close(fd);
 
-		/* blockID->LSN info file */
-		BlockInfoFile = fopen(BlockInfo, "w");
-		fclose(BlockInfoFile);
-
 		struct	timeval	tv;
 		gettimeofday(&tv, NULL);
 		ereport(WARNING,

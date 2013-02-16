@@ -6127,7 +6127,8 @@ StartupXLOG(void)
 	bool		backupEndRequired = false;
 	bool		backupFromStandby = false;
 	DBState		dbstate_at_startup;
-
+	bool found;
+	unsigned long cnt = 0;
 	/*
 	 * Read control file and check XLOG status looks valid.
 	 *
@@ -6660,6 +6661,8 @@ StartupXLOG(void)
 					(errmsg("redo starts at %X/%X",
 							ReadRecPtr.xlogid, ReadRecPtr.xrecoff)));
 
+			/* init global replay position */
+			xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
 			/*
 			 * main redo apply loop
 			 */
@@ -6760,6 +6763,13 @@ StartupXLOG(void)
 				/* Now apply the WAL record itself */
 				RmgrTable[record->xl_rmid].rm_redo(EndRecPtr, record);
 
+				/* update global redo position */
+				xlog_apply->apply = EndRecPtr;
+				if(cnt++ % 10000 == 0)
+					ereport(WARNING,
+							(errmsg("Xlog apply: %u.%u",
+							xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
+
 				/* Pop the error context stack */
 				error_context_stack = errcontext.previous;
 
@@ -6801,7 +6811,7 @@ StartupXLOG(void)
 			 * end of main redo apply loop
 			 */
 
-			ereport(LOG,
+			ereport(WARNING,
 					(errmsg("redo done at %X/%X",
 							ReadRecPtr.xlogid, ReadRecPtr.xrecoff)));
 			xtime = GetLatestXTime();

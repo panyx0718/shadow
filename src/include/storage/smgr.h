@@ -122,10 +122,17 @@ typedef struct XLogApplyData
 }XLogApplyData;
 typedef XLogApplyData *XLogApply;
 
+typedef struct FlushRequest
+{
+	RelFileNode rnode;
+	ForkNumber	forknum;
+	BlockNumber	blocknum;
+	XLogRecPtr	lsn;
+	char	flush;
+}FlushRequest;
 
 extern HTAB *LastBlockHash;
 extern HTAB *BlockLSNHash;
-extern FILE *BlockInfoFile;
 extern	XLogApply xlog_apply;
 
 extern void smgrinit(void);
@@ -170,7 +177,7 @@ extern XLogRecPtr get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumb
 extern XLogRecPtr get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
 extern void network_sync(char* buffer, RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush);
 extern void get_block_info();
-extern char* get_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn);
+extern void sync_block(FlushRequest request, int client_s);
 extern void clean_standby_resources();
 extern Size BlockLSNSize();
 /* internals: move me elsewhere -- ay 7/94 */

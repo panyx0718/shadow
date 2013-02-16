@@ -29,7 +29,7 @@
 #include "libpq/libpq.h"
 #include "miscadmin.h"
 #include "replication/walsender_private.h"
-
+#include "access/xlogutils.h"
 /*
  * This struct of function pointers defines the API between smgr.c and
  * any individual storage manager module.  Note that smgr subfunctions are
@@ -67,14 +67,7 @@ typedef struct f_smgr
 	void		(*smgr_post_ckpt) (void);		/* may be NULL */
 } f_smgr;
 
-typedef struct FlushRequest
-{
-	RelFileNode rnode;
-	ForkNumber	forknum;
-	BlockNumber	blocknum;
-	XLogRecPtr	lsn;
-	char	flush;
-}FlushRequest;
+
 static int req_len = sizeof(FlushRequest);
 
 static const f_smgr smgrsw[] = {
@@ -99,7 +92,8 @@ static SMgrRelation first_unowned_reln = NULL;
 
 HTAB *LastBlockHash = NULL;
 HTAB *BlockLSNHash = NULL;
-FILE *BlockInfoFile = NULL;
+static int primary_s = -1;
+static int standby_s = -1;
 XLogApply xlog_apply = NULL;
 
 /* local function prototypes */
@@ -937,7 +931,6 @@ get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
 void
 network_sync(char* buffer, RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush)
 {
-	int s = -1;
 	struct sockaddr_in addr;
 	FlushRequest request;
 	int rp = 0;
@@ -949,7 +942,7 @@ retry:
 	rp = 0;
 	ret = 0;
 
-	if((s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+	if((primary_s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		ereport(FATAL,
 				(errmsg("Unable to create socket")));
 
@@ -973,7 +966,7 @@ retry:
 	if(inet_aton(WalSndCtl->standby_addr, &addr.sin_addr) == 0)
 		ereport(FATAL,
 				(errmsg("Unable to inet_aton")));
-	if(connect(s, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+	if(connect(primary_s, (struct sockaddr *)&addr, sizeof(addr)) < 0)
 	{
 		ereport(ERROR,
 				(errmsg("Unable to connect to server")));
@@ -985,13 +978,13 @@ retry:
 	request.lsn = lsn;
 	request.flush = flush+'0';
 
-	if(write(s, &request, req_len) < 0)
+	if(write(primary_s, &request, req_len) < 0)
 		ereport(ERROR,
 				(errmsg("Unable to send")));
 	/* read the block back */
 	while(rp != BLCKSZ)
 	{
-		ret = read(s, (void*)buffer + rp, BLCKSZ - rp);
+		ret = read(primary_s, (void*)buffer + rp, BLCKSZ - rp);
 		if(ret <= 0)
 		{
 			if(cnt == 5)
@@ -1001,9 +994,10 @@ retry:
 			{
 				ereport(WARNING,
 						(errmsg("retry: %d", cnt++)));
-				close(s);
+				close(primary_s);
 				pg_usleep(timeout);
-				timeout += timeout;
+				if(timeout < 4000000)
+					timeout += timeout;
 				goto retry;
 			}
 		}
@@ -1012,37 +1006,44 @@ retry:
 	if(cnt == 0 && timeout > 100000)
 		timeout -= 100000;
 
-	close(s);
+	close(primary_s);
 }
 
 void shutdownHandler()
 {
-	if(BlockInfoFile != NULL)
-		fclose(BlockInfoFile);
+	ereport(WARNING,
+			(errmsg("get_block_info: shut down clean up")));
+	close(standby_s);
 	exit(1);
 }
 
-
+void shutdownHandler2()
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	xp_stack_trace(10, tv);
+	shutdownHandler();
+}
 
 void
 get_block_info()
 {
 	struct sockaddr_in server_addr;
-	int s, client_s;
 	const int max_client = 30;
 	int clients[max_client];
 	int clients_t[max_client];
+	int client_s;
 	int max_s;
 	int i;
 	ssize_t ret;
 	fd_set read_set;
 	struct timeval timer;
 	FlushRequest request;
-	struct timeval tv;
-	char *block_buf;
+	int cnt = 0;
 
 	pqsignal(SIGTERM, shutdownHandler);	/* request shutdown */
 	pqsignal(SIGQUIT, shutdownHandler);	/* hard crash time */
+	pqsignal(SIGSEGV, shutdownHandler2);	/* hard crash time */
 
 	/* init the xlog_apply, monitor how far the standby has replayed */
 	if(xlog_apply == NULL)
@@ -1053,8 +1054,10 @@ get_block_info()
 		ereport(WARNING,
 				(errmsg("Xlog Apply not inited by walreceiver")));
 	}
+
+retry:
 	/* init server socket */
-	if((s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+	if((standby_s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		ereport(FATAL,
 				(errmsg("Unable to create socket")));
 
@@ -1063,14 +1066,28 @@ get_block_info()
 	server_addr.sin_port = htons(flush_req_port);
 	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-	if(bind(s, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
-		ereport(FATAL,
-				(errmsg("Unable to bind")));
-	if(listen(s, 10) < 0)
-		ereport(FATAL,
-				(errmsg("Unable to bind")));
+	if(bind(standby_s, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+	{
+		ereport(WARNING,
+				(errmsg("Unable to bind: %s", strerror(errno))));
+		pg_usleep(1000000);
+		if(cnt++ == 5)
+			kill(getpid(), SIGTERM);
+		else
+		{
+			close(standby_s);
+			goto retry;
+		}
+	}
 
-	max_s = s;
+	if(listen(standby_s, 10) < 0)
+	{
+		ereport(FATAL,
+				(errmsg("Unable to listen")));
+		kill(getpid(), SIGTERM);
+	}
+
+	max_s = standby_s;
 	for(i = 0; i < max_client; i++)
 	{
 		clients[i] = 0;
@@ -1082,10 +1099,10 @@ get_block_info()
 	{
 		/* if the parent is dead */
 		if (getppid() == 1)
-			exit(1);
+			kill(getpid(), SIGTERM);
 
 		FD_ZERO(&read_set);
-		FD_SET(s, &read_set);
+		FD_SET(standby_s, &read_set);
 		for(i = 0; i < max_client; i++)
 			if(clients[i] > 0)
 				FD_SET(clients[i], &read_set);
@@ -1095,16 +1112,13 @@ get_block_info()
 
 		ret = select(max_s+3, &read_set, NULL, NULL, &timer);
 		if(ret < 0)
-		{
-			close(s);
-			exit(1);
-		}
+			kill(getpid(), SIGTERM);
 		else if(ret == 0)
 			continue;
 
-		if(FD_ISSET(s, &read_set))
+		if(FD_ISSET(standby_s, &read_set))
 		{
-			client_s = accept(s, (struct sockaddr *)NULL, NULL);
+			client_s = accept(standby_s, (struct sockaddr *)NULL, NULL);
 
 			i = 0;
 			for(; i < max_client; i++)
@@ -1129,18 +1143,6 @@ get_block_info()
 				ret = read(clients[i], &request, req_len);
 				if(ret == req_len && request.flush-'0' != 0)
 				{
-					/* get the requested block from the buffer */
-					block_buf = get_block(request.rnode, request.forknum, request.blocknum, request.lsn);
-
-					XLogRecPtr applied = PageGetLSN(block_buf);
-					if(!XLByteEQ(applied, request.lsn))
-					{
-						ereport(WARNING,
-								(errmsg("Block LSN not match: rnode:%u\tblocknum:%u\trequested:%u.%u, pageLSN:%u.%u",
-								request.rnode.relNode, request.blocknum,
-								request.lsn.xlogid, request.lsn.xrecoff, applied.xlogid, applied.xrecoff)));
-					}
-
 					if(XLByteLT(xlog_apply->apply, request.lsn))
 					{
 						ereport(WARNING,
@@ -1149,15 +1151,7 @@ get_block_info()
 								request.lsn.xlogid, request.lsn.xrecoff, xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
 					}
 					else
-					{
-						gettimeofday(&tv, NULL);
-						ereport(TRACE_LEVEL,
-							(errmsg("SyncABlock:%ld.%ld:\trnode:%u\tblocknum:%u\tpageLSN:%u.%u",
-									tv.tv_sec, tv.tv_usec, request.rnode.relNode,
-									request.blocknum, request.lsn.xlogid, request.lsn.xrecoff)));
-
-						write(clients[i], block_buf, BLCKSZ);
-					}
+						sync_block(request, clients[i]);
 				}
 				close(clients[i]);
 				clients[i] = 0;
@@ -1175,21 +1169,42 @@ get_block_info()
 	}
 }
 
-char*
-get_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn)
+void
+sync_block(FlushRequest request, int client_s)
 {
 	Buffer buf;
 	Page page;
+	XLogRecPtr pageLSN;
+	struct timeval tv;
 
-	smgropen(rnode, InvalidBackendId);
+	buf = XLogReadBufferExtended(request.rnode, request.forknum, request.blocknum, RBM_NORMAL);
 
-	if(!InRecovery && RecoveryInProgress())
-		InRecovery = true;
+	if(BufferIsValid(buf))
+	{
+		LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
-	buf = ReadBufferWithoutRelcache(rnode, forknum, blocknum, RBM_NORMAL, NULL);
-	page = (Page) BufferGetPage(buf);
+		page = (Page) BufferGetPage(buf);
+		pageLSN = PageGetLSN(page);
 
-	return (char*)page;
+		if(!XLByteEQ(pageLSN, request.lsn))
+		{
+			ereport(WARNING,
+					(errmsg("Block LSN not match: rnode:%u\tblocknum:%u\trequested:%u.%u\tpageLSN:%u.%u",
+					request.rnode.relNode, request.blocknum,
+					request.lsn.xlogid, request.lsn.xrecoff, pageLSN.xlogid, pageLSN.xrecoff)));
+		}
+		gettimeofday(&tv, NULL);
+		ereport(WARNING,
+			(errmsg("SyncABlock:%ld.%ld:\trnode:%u\tblocknum:%u\trequested:%u.%u\tapplied:%u.%u",
+					tv.tv_sec, tv.tv_usec, request.rnode.relNode,
+					request.blocknum, request.lsn.xlogid, request.lsn.xrecoff,
+					xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
+
+		PageSetLSN(page, request.lsn);
+		write(client_s, (void*)page, BLCKSZ);
+
+		UnlockReleaseBuffer(buf);
+	}
 }
 
 void
