@@ -126,8 +126,6 @@ typedef XLogApplyData *XLogApply;
 extern HTAB *LastBlockHash;
 extern HTAB *BlockLSNHash;
 extern FILE *BlockInfoFile;
-extern	XLogApply xlog_apply;
-extern bool sync_write;
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(RelFileNode rnode, BackendId backend);
@@ -169,9 +167,9 @@ extern void update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber 
 								XLogRecPtr lsn, HASHACTION action);
 extern XLogRecPtr get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
 extern XLogRecPtr get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
-extern void append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush);
+extern void network_sync(char* buffer, RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush);
 extern void get_block_info();
-extern void flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn);
+extern char* get_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn);
 extern void clean_standby_resources();
 extern Size BlockLSNSize();
 /* internals: move me elsewhere -- ay 7/94 */

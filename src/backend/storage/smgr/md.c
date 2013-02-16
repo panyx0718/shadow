@@ -686,7 +686,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 										reln->smgr_rnode.node.dbNode,
 										reln->smgr_rnode.node.relNode,
 										reln->smgr_rnode.backend);
-retry:
+
 	v = _mdfd_getseg(reln, forknum, blocknum, false, EXTENSION_FAIL);
 
 	seekpos = (off_t) BLCKSZ *(blocknum % ((BlockNumber) RELSEG_SIZE));
@@ -707,7 +707,7 @@ retry:
 		lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
 		if(lsn.xrecoff == 0)
 		{
-			/* new buffers are zero-filled */
+			/* extended new buffer. New buffers are zero-filled */
 			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, HASH_REMOVE);
 			ereport(TRACE_LEVEL,
 					(errmsg("FakeABlock:rnode:%u\tblocknum:%u",
@@ -724,7 +724,6 @@ retry:
 
 	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
-
 		/* neither unwritten nor empty */
 		if(lsn.xrecoff != 1 && lsn.xrecoff != 0)
 		{
@@ -733,26 +732,22 @@ retry:
 			if(!XLByteEQ(cur_lsn, lsn))
 			{
 				gettimeofday(&tv, NULL);
-				if(cnt == 6)
-				{
-					ereport(ERROR,
-                            (errmsg("CannotRead:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
-                                     tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
-                                     blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
-				}
 				ereport(TRACE_LEVEL,
 					(errmsg("WrongLSN:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
 							tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
-				append_block_info(reln->smgr_rnode.node, forknum, blocknum, lsn, true);
 
-				pg_usleep(sleep_time);
-				if(sleep_time <= 1000000)
-					sleep_time = sleep_time * 4;
-				goto retry;
-			}
-			else
+				network_sync(buffer, reln->smgr_rnode.node, forknum, blocknum, lsn, true);
+
+				gettimeofday(&tv, NULL);
+				cur_lsn = PageGetLSN(buffer);
+				ereport(TRACE_LEVEL,
+					(errmsg("getFreshBlock:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
+							tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
+							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
+
 				update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, HASH_REMOVE);
+			}
 		}
 	}
 
@@ -896,13 +891,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				reln->smgr_rnode.node.relNode)));
 #endif
 
-	if(sync_write)
-	{
-		if(FileSync(v->mdfd_vfd) < 0)
-			ereport(TRACE_LEVEL,
-					(errmsg("Fsync failed")));
-	}
-	else if (!skipFsync && !SmgrIsTemp(reln))
+	if (!skipFsync && !SmgrIsTemp(reln))
 		register_dirty_segment(reln, forknum, v);
 
 }

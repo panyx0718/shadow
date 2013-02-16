@@ -100,8 +100,6 @@ static SMgrRelation first_unowned_reln = NULL;
 HTAB *LastBlockHash = NULL;
 HTAB *BlockLSNHash = NULL;
 FILE *BlockInfoFile = NULL;
-XLogApply xlog_apply = NULL;
-bool sync_write = false;
 
 /* local function prototypes */
 static void smgrshutdown(int code, Datum arg);
@@ -936,50 +934,78 @@ get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
 
 
 void
-append_block_info(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush)
+network_sync(char* buffer, RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush)
 {
-	static int s = -1;
-	static struct sockaddr_in addr;
+	int s = -1;
+	struct sockaddr_in addr;
 	FlushRequest request;
+	int rp = 0;
+	int ret = 0;
+	int cnt = 0;
 
+retry:
+	rp = 0;
+	ret = 0;
 
-	if(s < 0)
+	if((s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+		ereport(FATAL,
+				(errmsg("Unable to create socket")));
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(flush_req_port);
+
+	if(WalSndCtl == NULL)
 	{
-		if((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-			ereport(FATAL,
-					(errmsg("Unable to create socket")));
-
-		memset(&addr, 0, sizeof(addr));
-		addr.sin_family = AF_INET;
-		addr.sin_port = htons(flush_req_port);
-
-		if(WalSndCtl == NULL)
-		{
-			ereport(WARNING,
-					(errmsg("Attach to WalSndCtl")));
-			bool found;
-			WalSndCtl = (WalSndCtlData *)
-				ShmemInitStruct("Wal Sender Ctl", WalSndShmemSize(), &found);
-
-			if(!found || WalSndCtl == NULL)
-				ereport(WARNING,
-						(errmsg("WalSndCtl not initiated")));
-		}
 		ereport(WARNING,
-				(errmsg("Init read sync connection: %s", WalSndCtl->standby_addr)));
-		if(inet_aton(WalSndCtl->standby_addr, &addr.sin_addr) == 0)
-			ereport(FATAL,
-					(errmsg("Unable to inet_aton")));
+				(errmsg("Attach to WalSndCtl")));
+		bool found;
+		WalSndCtl = (WalSndCtlData *)
+			ShmemInitStruct("Wal Sender Ctl", WalSndShmemSize(), &found);
+
+		if(!found || WalSndCtl == NULL)
+			ereport(WARNING,
+					(errmsg("WalSndCtl not initiated")));
 	}
+
+	if(inet_aton(WalSndCtl->standby_addr, &addr.sin_addr) == 0)
+		ereport(FATAL,
+				(errmsg("Unable to inet_aton")));
+	if(connect(s, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+	{
+		ereport(ERROR,
+				(errmsg("Unable to connect to server")));
+	}
+
 	request.rnode = rnode;
 	request.forknum = forknum;
 	request.blocknum = blocknum;
 	request.lsn = lsn;
 	request.flush = flush+'0';
 
-	if(sendto(s, &request, req_len, 0, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-		ereport(WARNING,
+	if(write(s, &request, req_len) < 0)
+		ereport(ERROR,
 				(errmsg("Unable to send")));
+	/* read the block back */
+	while(rp != BLCKSZ)
+	{
+		ret = read(s, (void*)buffer + rp, BLCKSZ - rp);
+		if(ret <= 0)
+		{
+			if(cnt == 3)
+				ereport(ERROR,
+						(errmsg("Unable to read the block: %d", rp)));
+			else
+			{
+				ereport(WARNING,
+						(errmsg("retry: %d", cnt++)));
+				close(s);
+				pg_usleep(100000);
+				goto retry;
+			}
+		}
+		rp += ret;
+	}
 }
 
 void shutdownHandler()
@@ -990,89 +1016,29 @@ void shutdownHandler()
 }
 
 
-#define request_his_size 8
-static FlushRequest* reqs[request_his_size];
-static int pos = -1;
-
-bool
-is_requested(FlushRequest aReq)
-{
-	int  i;
-
-	if(pos == -1)
-		return false;
-
-	for(i = 0; i < request_his_size; i++)
-	{
-		if(reqs[i] == NULL)
-			continue;
-
-		if(aReq.blocknum == reqs[i]->blocknum &&
-			aReq.forknum == reqs[i]->forknum &&
-			aReq.lsn.xrecoff == reqs[i]->lsn.xrecoff &&
-			aReq.rnode.relNode == reqs[i]->rnode.relNode &&
-			aReq.rnode.spcNode == reqs[i]->rnode.spcNode &&
-			aReq.rnode.dbNode == reqs[i]->rnode.dbNode &&
-			aReq.flush == reqs[i]->flush)
-		{
-			ereport(WARNING,
-					(errmsg("Requested:%u\t%u\t%u\t%u\t%u\t%u\t%u\t%c\n",
-							aReq.rnode.spcNode, aReq.rnode.dbNode, aReq.rnode.relNode,
-							aReq.forknum, aReq.blocknum, aReq.lsn.xlogid, aReq.lsn.xrecoff, aReq.flush)));
-			return true;
-		}
-
-	}
-	return false;
-}
-
-void
-add_requested(FlushRequest aReq)
-{
-	int i;
-	FlushRequest* new_req;
-
-	if(pos == -1)
-		for(i = 0; i < request_his_size; i++)
-			reqs[i] = NULL;
-
-	if(++pos % request_his_size == 0)
-		pos = 0;
-
-	new_req = (FlushRequest *)malloc(sizeof(FlushRequest));
-	memcpy(new_req, &aReq, sizeof(FlushRequest));
-
-	if(reqs[pos] != NULL)
-		free(reqs[pos]);
-	reqs[pos] = new_req;
-}
-
 
 void
 get_block_info()
 {
 	struct sockaddr_in server_addr;
-	int s;
+	int s, client_s;
+	const int max_client = 30;
+	int clients[max_client];
+	int clients_t[max_client];
+	int max_s;
+	int i;
 	ssize_t ret;
 	fd_set read_set;
 	struct timeval timer;
 	FlushRequest request;
+	struct timeval tv;
+	char *block_buf;
 
 	pqsignal(SIGTERM, shutdownHandler);	/* request shutdown */
 	pqsignal(SIGQUIT, shutdownHandler);	/* hard crash time */
 
-	/* init the xlog_apply, monitor how far the standby has replayed */
-	if(xlog_apply == NULL)
-	{
-		bool found;
-		xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
-		if(!found)
-			ereport(WARNING,
-					(errmsg("Xlog Apply not inited by walreceiver")));
-	}
-
 	/* init server socket */
-	if((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+	if((s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		ereport(FATAL,
 				(errmsg("Unable to create socket")));
 
@@ -1084,89 +1050,121 @@ get_block_info()
 	if(bind(s, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
 		ereport(FATAL,
 				(errmsg("Unable to bind")));
+	if(listen(s, 10) < 0)
+		ereport(FATAL,
+				(errmsg("Unable to bind")));
 
-	FD_ZERO(&read_set);
-	FD_SET(s, &read_set);
-	timer.tv_sec = 1;
-	timer.tv_usec = 0;
+	max_s = s;
+	for(i = 0; i < max_client; i++)
+	{
+		clients[i] = 0;
+		clients_t[i] = 0;
+	}
 
 	/* start the loop to receive primary request */
 	while(1)
 	{
-		/* if the primary is dead */
+		/* if the parent is dead */
 		if (getppid() == 1)
 			exit(1);
 
-		ret = select(s+1, &read_set, NULL, NULL, &timer);
+		FD_ZERO(&read_set);
+		FD_SET(s, &read_set);
+		for(i = 0; i < max_client; i++)
+			if(clients[i] > 0)
+				FD_SET(clients[i], &read_set);
+
+		timer.tv_sec = 1;
+		timer.tv_usec = 0;
+
+		ret = select(max_s+3, &read_set, NULL, NULL, &timer);
 		if(ret < 0)
 		{
 			close(s);
 			exit(1);
 		}
-
-		FD_ZERO(&read_set);
-		FD_SET(s, &read_set);
-		timer.tv_sec = 1;
-		timer.tv_usec = 0;
-
-		if(ret == 0)
+		else if(ret == 0)
 			continue;
 
-		/* receive a request */
-		ret = recvfrom(s, &request, req_len, 0, NULL, NULL);
-		if(ret == req_len)
+		if(FD_ISSET(s, &read_set))
 		{
-			/* if it was recently requested and flushed */
-			if(is_requested(request))
-				continue;
-			/* if the standby has not replayed that far */
-			if(!XLByteLT(request.lsn, xlog_apply->apply))
-			{
-				ereport(WARNING,
-						(errmsg("WriteRequestDelay:applied:%u.%u\trequest:%u.%u",
-								xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff,
-								request.lsn.xlogid, request.lsn.xrecoff)));
-				continue;
-			}
+			client_s = accept(s, (struct sockaddr *)NULL, NULL);
 
-			if(request.flush-'0' != 0)
+			i = 0;
+			for(; i < max_client; i++)
 			{
-				flush_block(request.rnode, request.forknum, request.blocknum, request.lsn);
-				add_requested(request);
+				if(clients[i] == 0)
+				{
+					clients[i] = client_s;
+					clients_t[i] = 10;
+					break;
+				}
+			}
+			if(i == max_client)
+				close(client_s);
+			else if(max_s < client_s)
+				max_s = client_s;
+		}
+
+		for(i = 0; i < max_client; i++)
+		{
+			if(FD_ISSET(clients[i], &read_set))
+			{
+				ret = read(clients[i], &request, req_len);
+				if(ret == req_len && request.flush-'0' != 0)
+				{
+					/* get the requested block from the buffer */
+					block_buf = get_block(request.rnode, request.forknum, request.blocknum, request.lsn);
+
+					XLogRecPtr applied = PageGetLSN(block_buf);
+					if(!XLByteEQ(applied, request.lsn))
+					{
+						ereport(WARNING,
+								(errmsg("Block LSN not match: requested:%u.%u, applied:%u.%u",
+								request.lsn.xlogid, request.lsn.xrecoff, applied.xlogid, applied.xrecoff)));
+					}
+					else
+					{
+						gettimeofday(&tv, NULL);
+						ereport(TRACE_LEVEL,
+							(errmsg("SyncABlock:%ld.%ld:\trnode:%u\tblocknum:%u\tpageLSN:%u.%u",
+									tv.tv_sec, tv.tv_usec, request.rnode.relNode,
+									request.blocknum, request.lsn.xlogid, request.lsn.xrecoff)));
+
+						write(clients[i], block_buf, BLCKSZ);
+					}
+				}
+				close(clients[i]);
+				clients[i] = 0;
+			}
+			else if(clients[i] > 0)
+			{
+				clients_t[i]--;
+				if(clients_t[i] < 0)
+				{
+					close(clients[i]);
+					clients[i] = 0;
+				}
 			}
 		}
 	}
 }
 
-void
-flush_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn)
+char*
+get_block(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn)
 {
 	Buffer buf;
 	Page page;
-	SMgrRelation smgr;
-	bool found;
-	struct timeval tv;
 
-	gettimeofday(&tv, NULL);
-	ereport(WARNING,
-			(errmsg("FlushRequest:%ld.%ld\t%u\t%u\t%u\t%u\t%u\tapplied:%u.%u\trequested:%u.%u",
-			tv.tv_sec, tv.tv_usec, rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
-			xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff, lsn.xlogid, lsn.xrecoff)));
-
-	smgr = smgropen(rnode, InvalidBackendId);
+	smgropen(rnode, InvalidBackendId);
 
 	if(!InRecovery && RecoveryInProgress())
 		InRecovery = true;
 
 	buf = ReadBufferWithoutRelcache(rnode, forknum, blocknum, RBM_NORMAL, NULL);
-	LockBuffer(buf, BUFFER_LOCK_SHARE);
-
 	page = (Page) BufferGetPage(buf);
-	PageSetLSN(page, lsn);
-	sync_write = true;
-	smgrwrite(smgr, forknum, blocknum, (char*)page, false);
-	sync_write = false;
-	UnlockReleaseBuffer(buf);
+
+	return (char*)page;
 }
 
 void
