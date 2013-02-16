@@ -100,6 +100,7 @@ static SMgrRelation first_unowned_reln = NULL;
 HTAB *LastBlockHash = NULL;
 HTAB *BlockLSNHash = NULL;
 FILE *BlockInfoFile = NULL;
+XLogApply xlog_apply = NULL;
 
 /* local function prototypes */
 static void smgrshutdown(int code, Datum arg);
@@ -942,6 +943,7 @@ network_sync(char* buffer, RelFileNode rnode, ForkNumber forknum, BlockNumber bl
 	int rp = 0;
 	int ret = 0;
 	int cnt = 0;
+	static long timeout = 100000;
 
 retry:
 	rp = 0;
@@ -992,7 +994,7 @@ retry:
 		ret = read(s, (void*)buffer + rp, BLCKSZ - rp);
 		if(ret <= 0)
 		{
-			if(cnt == 3)
+			if(cnt == 5)
 				ereport(ERROR,
 						(errmsg("Unable to read the block: %d", rp)));
 			else
@@ -1000,12 +1002,17 @@ retry:
 				ereport(WARNING,
 						(errmsg("retry: %d", cnt++)));
 				close(s);
-				pg_usleep(100000);
+				pg_usleep(timeout);
+				timeout += timeout;
 				goto retry;
 			}
 		}
 		rp += ret;
 	}
+	if(cnt == 0 && timeout > 100000)
+		timeout -= 100000;
+
+	close(s);
 }
 
 void shutdownHandler()
@@ -1037,6 +1044,15 @@ get_block_info()
 	pqsignal(SIGTERM, shutdownHandler);	/* request shutdown */
 	pqsignal(SIGQUIT, shutdownHandler);	/* hard crash time */
 
+	/* init the xlog_apply, monitor how far the standby has replayed */
+	if(xlog_apply == NULL)
+	{
+		bool found;
+		xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
+		if(!found)
+		ereport(WARNING,
+				(errmsg("Xlog Apply not inited by walreceiver")));
+	}
 	/* init server socket */
 	if((s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		ereport(FATAL,
@@ -1120,8 +1136,17 @@ get_block_info()
 					if(!XLByteEQ(applied, request.lsn))
 					{
 						ereport(WARNING,
-								(errmsg("Block LSN not match: requested:%u.%u, applied:%u.%u",
+								(errmsg("Block LSN not match: rnode:%u\tblocknum:%u\trequested:%u.%u, pageLSN:%u.%u",
+								request.rnode.relNode, request.blocknum,
 								request.lsn.xlogid, request.lsn.xrecoff, applied.xlogid, applied.xrecoff)));
+					}
+
+					if(XLByteLT(xlog_apply->apply, request.lsn))
+					{
+						ereport(WARNING,
+								(errmsg("DelaySync: rnode:%u\tblocknum:%u\trequested:%u.%u, applied:%u.%u",
+								request.rnode.relNode, request.blocknum,
+								request.lsn.xlogid, request.lsn.xrecoff, xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
 					}
 					else
 					{

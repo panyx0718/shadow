@@ -679,7 +679,6 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	MdfdVec    *v;
 	struct timeval tv;
 	long sleep_time = 100000;
-	int cnt = 0;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -733,8 +732,8 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 			{
 				gettimeofday(&tv, NULL);
 				ereport(TRACE_LEVEL,
-					(errmsg("WrongLSN:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
-							tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
+					(errmsg("WrongLSN:%ld.%ld:\trnode:%u\tblocknum:%u\tdiskLSN:%u.%u\tneedLSN:%u.%u",
+							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff, lsn.xlogid, lsn.xrecoff)));
 
 				network_sync(buffer, reln->smgr_rnode.node, forknum, blocknum, lsn, true);
@@ -742,8 +741,8 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				gettimeofday(&tv, NULL);
 				cur_lsn = PageGetLSN(buffer);
 				ereport(TRACE_LEVEL,
-					(errmsg("getFreshBlock:%ld.%ld.%d:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
-							tv.tv_sec, tv.tv_usec, cnt++, reln->smgr_rnode.node.relNode,
+					(errmsg("getFreshBlock:%ld.%ld:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
+							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
 
 				update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, HASH_REMOVE);

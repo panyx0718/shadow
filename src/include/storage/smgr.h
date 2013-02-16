@@ -126,6 +126,7 @@ typedef XLogApplyData *XLogApply;
 extern HTAB *LastBlockHash;
 extern HTAB *BlockLSNHash;
 extern FILE *BlockInfoFile;
+extern	XLogApply xlog_apply;
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(RelFileNode rnode, BackendId backend);

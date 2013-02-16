@@ -287,6 +287,8 @@ WalReceiverMain(void)
 
 
 		/* xp. start standby mode */
+		bool found;
+		xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
 
 		/* primary trigger file for other process */
 		int fd = BasicOpenFile("pg_tmp/standby_mode",
@@ -712,6 +714,8 @@ XLogWalRcvSendReply(void)
 	reply_message.apply = GetXLogReplayRecPtr(NULL);
 	reply_message.sendTime = now;
 
+	if(xlog_apply != NULL)
+		xlog_apply->apply = reply_message.apply;
 
 	elog(DEBUG2, "sending write %X/%X flush %X/%X apply %X/%X",
 		 reply_message.write.xlogid, reply_message.write.xrecoff,
