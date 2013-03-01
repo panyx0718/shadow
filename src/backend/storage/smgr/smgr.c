@@ -858,8 +858,8 @@ init_block_lsn_hash()
  * HASH_ENTER_NULL
  */
 void
-update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
-					XLogRecPtr lsn, HASHACTION action)
+update_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
+					PageHeader header, HASHACTION action)
 {
 	BlockTag blk_tag;
 	bool found;
@@ -890,21 +890,18 @@ update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
                         lsn.xlogid, lsn.xrecoff)));
 */
 	if(val != NULL)
-	{
-		val->lsn = lsn;
-	}
+		memcpy(&(val->header), header, sizeof(PageHeaderData));
 	else if(action == HASH_ENTER_NULL)
 		ereport(ERROR,
 			(errmsg("OutofMemory for block lsn hash")));
 }
 
-XLogRecPtr
-get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
+bool
+get_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, PageHeader header)
 {
 	bool found;
 	BlockTag blk_tag;
 	BlockLSN val;
-	XLogRecPtr invalid = {0, 1};
 
 	if(BlockLSNHash == NULL)
 	{
@@ -922,9 +919,15 @@ get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
 										&found);
 
 	if(val != NULL)
-		return val->lsn;
+	{
+		(*header) = val->header;
+		return true;
+	}
 	else
-		return invalid;
+	{
+		MemSet(header, 0, sizeof(PageHeaderData));
+		return false;
+	}
 }
 
 

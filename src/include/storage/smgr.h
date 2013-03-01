@@ -108,7 +108,7 @@ typedef struct BlockTag
 typedef struct BlockLSNData
 {
 	BlockTag blk_tag;
-	XLogRecPtr lsn;
+	PageHeaderData header;
 }BlockLSNData;
 typedef BlockLSNData *BlockLSN;
 
@@ -171,10 +171,10 @@ extern void modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACT
 extern BlockNumber get_last_block_hash(char *filename, HASHACTION action);
 
 extern HTAB* init_block_lsn_hash();
-extern void update_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
-								XLogRecPtr lsn, HASHACTION action);
-extern XLogRecPtr get_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
-extern XLogRecPtr get_standby_block_lsn(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
+extern void update_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
+								PageHeader header, HASHACTION action);
+extern bool get_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, PageHeader header);
+
 extern void network_sync(char* buffer, RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush);
 extern void get_block_info();
 extern void sync_block(FlushRequest request, int client_s);

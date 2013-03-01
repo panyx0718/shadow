@@ -532,7 +532,7 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		if(is_tracked(filename))
 		{
 			//int newblknum = blocknum % ((BlockNumber) RELSEG_SIZE) + 1;
-			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), HASH_ENTER_NULL);
+			update_block_header(reln->smgr_rnode.node, forknum, blocknum, (PageHeader)buffer, HASH_ENTER_NULL);
 			modify_last_block_hash(filename, (seekpos + BLCKSZ) / BLCKSZ, HASH_ENTER_NULL);
 		}
 	}
@@ -698,19 +698,24 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						blocknum, FilePathName(v->mdfd_vfd))));
 
 
+	bool found;
 	XLogRecPtr cur_lsn;
 	XLogRecPtr lsn;
+	PageHeaderData header;
 	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
-		lsn = get_block_lsn(reln->smgr_rnode.node, forknum, blocknum);
-		if(lsn.xrecoff == 0)
+		found = get_block_header(reln->smgr_rnode.node, forknum, blocknum, &header);
+		lsn = header.pd_lsn;
+		if(found && lsn.xrecoff == 0)
 		{
 			/* extended new buffer. New buffers are zero-filled */
-			update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, HASH_REMOVE);
+			update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
 			ereport(TRACE_LEVEL,
 					(errmsg("FakeABlock:rnode:%u\tblocknum:%u",
 							reln->smgr_rnode.node.relNode, blocknum)));
 			MemSet((char *) buffer, 0, BLCKSZ);
+			memcpy(buffer, &header, sizeof(PageHeaderData));
+
 			nbytes = BLCKSZ;
 		}
 		else
@@ -723,7 +728,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
 		/* neither unwritten nor empty */
-		if(lsn.xrecoff != 1 && lsn.xrecoff != 0)
+		if(found && lsn.xrecoff != 0)
 		{
 			cur_lsn = PageGetLSN(buffer);
 
@@ -744,7 +749,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
 
-				update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, lsn, HASH_REMOVE);
+				update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
 			}
 		}
 	}
@@ -835,7 +840,7 @@ mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						blocknum, FilePathName(v->mdfd_vfd))));
 
 	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
-		update_block_lsn(reln->smgr_rnode.node, forknum, blocknum, PageGetLSN(buffer), HASH_ENTER_NULL);
+		update_block_header(reln->smgr_rnode.node, forknum, blocknum, (PageHeader)buffer, HASH_ENTER_NULL);
 
 	nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ);
 
