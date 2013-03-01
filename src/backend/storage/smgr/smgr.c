@@ -1007,6 +1007,12 @@ retry:
 		timeout -= 100000;
 
 	close(primary_s);
+
+	if(!PageIsValid(buffer) || PageIsNew(buffer))
+	{
+		ereport(ERROR,
+				(errmsg("WrongPage:rnode:%u\tblocknum:%u", rnode.relNode, blocknum)));
+	}
 }
 
 void shutdownHandler()
