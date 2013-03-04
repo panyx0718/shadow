@@ -20,6 +20,7 @@
 #include "storage/block.h"
 #include "storage/relfilenode.h"
 #include "storage/s_lock.h"
+#include "storage/bufpage.h"
 #include "access/xlogdefs.h"
 
 /*

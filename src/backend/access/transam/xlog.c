@@ -6128,7 +6128,6 @@ StartupXLOG(void)
 	bool		backupFromStandby = false;
 	DBState		dbstate_at_startup;
 	bool found;
-	unsigned long cnt = 0;
 	/*
 	 * Read control file and check XLOG status looks valid.
 	 *
@@ -6765,11 +6764,12 @@ StartupXLOG(void)
 
 				/* update global redo position */
 				xlog_apply->apply = EndRecPtr;
+/*
 				if(cnt++ % 10000 == 0)
 					ereport(WARNING,
 							(errmsg("Xlog apply: %u.%u",
 							xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
-
+*/
 				/* Pop the error context stack */
 				error_context_stack = errcontext.previous;
 

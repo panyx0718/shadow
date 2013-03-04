@@ -98,6 +98,10 @@ log_invalid_page(RelFileNode node, ForkNumber forkno, BlockNumber blkno,
 	 */
 	if (reachedConsistency)
 	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		xp_stack_trace(10, tv);
+
 		report_invalid_page(WARNING, node, forkno, blkno, present);
 		elog(PANIC, "WAL contains references to invalid pages");
 	}

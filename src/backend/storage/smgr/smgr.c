@@ -987,7 +987,7 @@ retry:
 	/* read the block back */
 	while(rp != BLCKSZ)
 	{
-		ret = read(primary_s, (void*)buffer + rp, BLCKSZ - rp);
+		ret = read(primary_s, (char*)buffer + rp, BLCKSZ - rp);
 		if(ret <= 0)
 		{
 			if(cnt == 5)
@@ -1010,12 +1010,6 @@ retry:
 		timeout -= 100000;
 
 	close(primary_s);
-
-	if(!PageIsValid(buffer) || PageIsNew(buffer))
-	{
-		ereport(ERROR,
-				(errmsg("WrongPage:rnode:%u\tblocknum:%u", rnode.relNode, blocknum)));
-	}
 }
 
 void shutdownHandler()
@@ -1197,7 +1191,7 @@ sync_block(FlushRequest request, int client_s)
 
 		if(!XLByteEQ(pageLSN, request.lsn))
 		{
-			ereport(WARNING,
+			ereport(ERROR,
 					(errmsg("Block LSN not match: rnode:%u\tblocknum:%u\trequested:%u.%u\tpageLSN:%u.%u",
 					request.rnode.relNode, request.blocknum,
 					request.lsn.xlogid, request.lsn.xrecoff, pageLSN.xlogid, pageLSN.xrecoff)));
@@ -1209,8 +1203,8 @@ sync_block(FlushRequest request, int client_s)
 					request.blocknum, request.lsn.xlogid, request.lsn.xrecoff,
 					xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
 
-		PageSetLSN(page, request.lsn);
-		write(client_s, (void*)page, BLCKSZ);
+		//PageSetLSN(page, request.lsn);
+		write(client_s, (char*)page, BLCKSZ);
 
 		UnlockReleaseBuffer(buf);
 	}

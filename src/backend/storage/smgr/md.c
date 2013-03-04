@@ -534,6 +534,9 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 			//int newblknum = blocknum % ((BlockNumber) RELSEG_SIZE) + 1;
 			update_block_header(reln->smgr_rnode.node, forknum, blocknum, (PageHeader)buffer, HASH_ENTER_NULL);
 			modify_last_block_hash(filename, (seekpos + BLCKSZ) / BLCKSZ, HASH_ENTER_NULL);
+			ereport(TRACE_LEVEL,
+					(errmsg("ExtendABlock:rnode:%u\tblocknum:%u",
+							reln->smgr_rnode.node.relNode, blocknum)));
 		}
 	}
 
@@ -677,7 +680,6 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	int			nbytes;
 	MdfdVec    *v;
 	struct timeval tv;
-	long sleep_time = 100000;
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum,
 										reln->smgr_rnode.node.spcNode,
@@ -731,7 +733,6 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		if(found && lsn.xrecoff != 0)
 		{
 			cur_lsn = PageGetLSN(buffer);
-
 			if(!XLByteEQ(cur_lsn, lsn))
 			{
 				gettimeofday(&tv, NULL);
@@ -748,10 +749,15 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 					(errmsg("getFreshBlock:%ld.%ld:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
 							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
-
-				update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
 			}
+			update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
 		}
+	}
+
+	if(!PageIsValid(buffer) || PageIsNew(buffer))
+	{
+		ereport(WARNING,
+				(errmsg("WrongPage:rnode:%u\tblocknum:%u", reln->smgr_rnode.node.relNode, blocknum)));
 	}
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
@@ -1035,6 +1041,7 @@ mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 					errmsg("could not truncate file \"%s\" to %u blocks: %m",
 						   FilePathName(v->mdfd_vfd),
 						   nblocks)));
+
 			if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 			{
 				modify_last_block_hash(FilePathName(v->mdfd_vfd),
