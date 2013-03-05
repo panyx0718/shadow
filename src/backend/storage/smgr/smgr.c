@@ -499,6 +499,16 @@ smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		   char *buffer, bool skipFsync)
 {
 
+	if(is_primary_mode())
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		xp_stack_trace(10, tv);
+		ereport(TRACE_LEVEL,
+				(errmsg("Smgrextend:rnode:%u\tblocknum:%u",
+				reln->smgr_rnode.node.relNode, blocknum)));
+	}
+
 	(*(smgrsw[reln->smgr_which].smgr_extend)) (reln, forknum, blocknum,
 											   buffer, skipFsync);
 }
@@ -560,8 +570,21 @@ smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 BlockNumber
 smgrnblocks(SMgrRelation reln, ForkNumber forknum)
 {
+	BlockNumber blocknum;
 
-	return (*(smgrsw[reln->smgr_which].smgr_nblocks)) (reln, forknum);
+	blocknum = (*(smgrsw[reln->smgr_which].smgr_nblocks)) (reln, forknum);
+
+	if(is_primary_mode())
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		xp_stack_trace(10, tv);
+		ereport(TRACE_LEVEL,
+				(errmsg("Smgrnblock:rnode:%u\tblocknum:%u",
+				reln->smgr_rnode.node.relNode, blocknum)));
+	}
+
+	return blocknum;
 }
 
 /*
@@ -1191,7 +1214,7 @@ sync_block(FlushRequest request, int client_s)
 
 		if(!XLByteEQ(pageLSN, request.lsn))
 		{
-			ereport(ERROR,
+			ereport(WARNING,
 					(errmsg("Block LSN not match: rnode:%u\tblocknum:%u\trequested:%u.%u\tpageLSN:%u.%u",
 					request.rnode.relNode, request.blocknum,
 					request.lsn.xlogid, request.lsn.xrecoff, pageLSN.xlogid, pageLSN.xrecoff)));

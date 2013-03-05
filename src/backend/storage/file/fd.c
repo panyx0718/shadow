@@ -1355,6 +1355,8 @@ off_t
 FileSeek(File file, off_t offset, int whence)
 {
 	int			returnCode;
+	int			primary_mode = false;
+	off_t		len = 0;
 
 	Assert(FileIsValid(file));
 
@@ -1362,6 +1364,14 @@ FileSeek(File file, off_t offset, int whence)
 			   file, VfdCache[file].fileName,
 			   (int64) VfdCache[file].seekPos,
 			   (int64) offset, whence));
+
+	if(is_primary_mode() && is_tracked(FilePathName(file)))
+	{
+		primary_mode = true;
+		BlockNumber blocknum = get_last_block_hash(FilePathName(file), HASH_FIND);
+		if(blocknum != InvalidBlockNumber)
+			len = blocknum * BLCKSZ;
+	}
 
 	if (FileIsNotOpen(file))
 	{
@@ -1380,8 +1390,7 @@ FileSeek(File file, off_t offset, int whence)
 				returnCode = FileAccess(file);
 				if (returnCode < 0)
 					return returnCode;
-				VfdCache[file].seekPos = lseek(VfdCache[file].fd,
-											   offset, whence);
+				VfdCache[file].seekPos = lseek(VfdCache[file].fd, offset, whence);
 				break;
 			default:
 				elog(ERROR, "invalid whence: %d", whence);
@@ -1397,8 +1406,12 @@ FileSeek(File file, off_t offset, int whence)
 					elog(ERROR, "invalid seek offset: " INT64_FORMAT,
 						 (int64) offset);
 				if (VfdCache[file].seekPos != offset)
-					VfdCache[file].seekPos = lseek(VfdCache[file].fd,
-												   offset, whence);
+				{
+					if(!primary_mode)
+						VfdCache[file].seekPos = lseek(VfdCache[file].fd, offset, whence);
+					else
+						VfdCache[file].seekPos = offset;
+				}
 				break;
 			case SEEK_CUR:
 				if (offset != 0 || VfdCache[file].seekPos == FileUnknownPos)

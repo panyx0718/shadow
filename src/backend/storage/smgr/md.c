@@ -469,7 +469,6 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	off_t		seekpos;
 	int			nbytes;
 	MdfdVec    *v;
-	struct timeval tv;
 
 	/* This assert is too expensive to have on normally ... */
 #ifdef CHECK_WRITE_VS_EXTEND
@@ -487,8 +486,16 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("cannot extend file \"%s\" beyond %u blocks",
 						relpath(reln->smgr_rnode, forknum),
 						InvalidBlockNumber)));
-
+	if(is_primary_mode())
+		ereport(TRACE_LEVEL,
+			(errmsg("touch1:rnode:%u\tblocknum:%u",
+					reln->smgr_rnode.node.relNode, blocknum)));
 	v = _mdfd_getseg(reln, forknum, blocknum, skipFsync, EXTENSION_CREATE);
+
+	if(is_primary_mode())
+		ereport(TRACE_LEVEL,
+			(errmsg("touch2:rnode:%u\tblocknum:%u",
+					reln->smgr_rnode.node.relNode, blocknum)));
 
 	seekpos = (off_t) BLCKSZ *(blocknum % ((BlockNumber) RELSEG_SIZE));
 
@@ -509,6 +516,10 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 				 errmsg("could not seek to block %u in file \"%s\": %m",
 						blocknum, FilePathName(v->mdfd_vfd))));
 
+	if(is_primary_mode())
+		ereport(TRACE_LEVEL,
+			(errmsg("touch3:rnode:%u\tblocknum:%u",
+					reln->smgr_rnode.node.relNode, blocknum)));
 
 	if ((nbytes = FileWrite(v->mdfd_vfd, buffer, BLCKSZ)) != BLCKSZ)
 	{
@@ -526,6 +537,12 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 						nbytes, BLCKSZ, blocknum),
 				 errhint("Check free disk space.")));
 	}
+
+	if(is_primary_mode())
+		ereport(TRACE_LEVEL,
+			(errmsg("touch4:rnode:%u\tblocknum:%u",
+					reln->smgr_rnode.node.relNode, blocknum)));
+
 	if(is_primary_mode())
 	{
 		char *filename = FilePathName(v->mdfd_vfd);
@@ -745,10 +762,16 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 
 				gettimeofday(&tv, NULL);
 				cur_lsn = PageGetLSN(buffer);
-				ereport(TRACE_LEVEL,
-					(errmsg("getFreshBlock:%ld.%ld:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
-							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
-							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
+				if(XLByteEQ(cur_lsn, lsn))
+					ereport(TRACE_LEVEL,
+							(errmsg("getFreshBlock:%ld.%ld:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
+									tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
+									blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
+				else
+					ereport(ERROR,
+							(errmsg("LSN not match:%ld.%ld:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
+									tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
+									blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
 			}
 			update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
 		}
@@ -1936,17 +1959,7 @@ _mdnblocks(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 						FilePathName(seg->mdfd_vfd))));
 
 
-/*
-#ifdef XP_TRACE_MD_WRITE
-	gettimeofday(&tv, NULL);
-#ifdef TRACE_STACK
-	xp_stack_trace(TRACE_SIZE, tv);
-#endif
-	ereport(TRACE_LEVEL,
-		(errmsg("%ld.%ld:\tREAD:_mdnblocks:\tfile:%s\tforknum:%u\tblocknum:%d",
-				tv.tv_sec, tv.tv_usec, FilePathName(seg->mdfd_vfd), forknum, len/BLCKSZ)));
-#endif
-*/
+
 	/* note that this calculation will ignore any partial block at EOF */
 	return (BlockNumber) (len / BLCKSZ);
 }
