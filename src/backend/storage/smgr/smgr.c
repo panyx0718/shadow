@@ -498,17 +498,6 @@ void
 smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		   char *buffer, bool skipFsync)
 {
-
-	if(is_primary_mode())
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		xp_stack_trace(10, tv);
-		ereport(TRACE_LEVEL,
-				(errmsg("Smgrextend:rnode:%u\tblocknum:%u",
-				reln->smgr_rnode.node.relNode, blocknum)));
-	}
-
 	(*(smgrsw[reln->smgr_which].smgr_extend)) (reln, forknum, blocknum,
 											   buffer, skipFsync);
 }
@@ -570,21 +559,7 @@ smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 BlockNumber
 smgrnblocks(SMgrRelation reln, ForkNumber forknum)
 {
-	BlockNumber blocknum;
-
-	blocknum = (*(smgrsw[reln->smgr_which].smgr_nblocks)) (reln, forknum);
-
-	if(is_primary_mode())
-	{
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		xp_stack_trace(10, tv);
-		ereport(TRACE_LEVEL,
-				(errmsg("Smgrnblock:rnode:%u\tblocknum:%u",
-				reln->smgr_rnode.node.relNode, blocknum)));
-	}
-
-	return blocknum;
+	return (*(smgrsw[reln->smgr_which].smgr_nblocks)) (reln, forknum);
 }
 
 /*
