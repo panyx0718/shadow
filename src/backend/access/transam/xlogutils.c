@@ -101,9 +101,9 @@ log_invalid_page(RelFileNode node, ForkNumber forkno, BlockNumber blkno,
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		xp_stack_trace(10, tv);
-
+		/* it used to PANIC here. */
 		report_invalid_page(WARNING, node, forkno, blkno, present);
-		elog(PANIC, "WAL contains references to invalid pages");
+		elog(WARNING, "WAL contains references to invalid pages");
 	}
 
 	/*

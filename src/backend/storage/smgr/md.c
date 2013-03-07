@@ -469,7 +469,6 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	off_t		seekpos;
 	int			nbytes;
 	MdfdVec    *v;
-	struct timeval tv;
 
 	/* This assert is too expensive to have on normally ... */
 #ifdef CHECK_WRITE_VS_EXTEND
@@ -532,7 +531,16 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		char *filename = FilePathName(v->mdfd_vfd);
 		if(is_tracked(filename))
 		{
-			//int newblknum = blocknum % ((BlockNumber) RELSEG_SIZE) + 1;
+			if(!PageIsNew(buffer))
+			{
+				struct timeval tv;
+				gettimeofday(&tv, NULL);
+				xp_stack_trace(10, tv);
+				ereport(ERROR,
+						(errmsg("ExtendBlockNotNew:rnode:%u\tblocknum:%u",
+								reln->smgr_rnode.node.relNode, blocknum)));
+			}
+			((PageHeader)buffer)->pd_lsn.xrecoff = 1;
 			update_block_header(reln->smgr_rnode.node, forknum, blocknum, (PageHeader)buffer, HASH_ENTER_NULL);
 			modify_last_block_hash(filename, (seekpos + BLCKSZ) / BLCKSZ, HASH_ENTER_NULL);
 		}
@@ -706,7 +714,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	{
 		found = get_block_header(reln->smgr_rnode.node, forknum, blocknum, &header);
 		lsn = header.pd_lsn;
-		if(found && lsn.xrecoff == 0)
+		if(found && lsn.xrecoff == 1)
 		{
 			/* extended new buffer. New buffers are zero-filled */
 			update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
@@ -714,6 +722,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 					(errmsg("FakeABlock:rnode:%u\tblocknum:%u",
 							reln->smgr_rnode.node.relNode, blocknum)));
 			MemSet((char *) buffer, 0, BLCKSZ);
+			header.pd_lsn.xrecoff = 0;
 			memcpy(buffer, &header, sizeof(PageHeaderData));
 
 			nbytes = BLCKSZ;
@@ -728,7 +737,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 	if(is_primary_mode() && is_tracked(FilePathName(v->mdfd_vfd)))
 	{
 		/* neither unwritten nor empty */
-		if(found && lsn.xrecoff != 0)
+		if(found && lsn.xrecoff != 1)
 		{
 			cur_lsn = PageGetLSN(buffer);
 			if(!XLByteEQ(cur_lsn, lsn))
@@ -750,13 +759,24 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 			}
 			update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
 		}
+		else if(!found && PageIsNew(buffer))
+		{
+			ereport(WARNING,
+					(errmsg("WrongPage:rnode:%u\tblocknum:%u",
+							reln->smgr_rnode.node.relNode, blocknum)));
+
+			network_sync(buffer, reln->smgr_rnode.node, forknum, blocknum, lsn, true);
+
+			gettimeofday(&tv, NULL);
+			cur_lsn = PageGetLSN(buffer);
+			ereport(TRACE_LEVEL,
+				(errmsg("getFreshBlock:%ld.%ld:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
+						tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
+						blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
+		}
 	}
 
-	if(!PageIsValid(buffer) || PageIsNew(buffer))
-	{
-		ereport(WARNING,
-				(errmsg("WrongPage:rnode:%u\tblocknum:%u", reln->smgr_rnode.node.relNode, blocknum)));
-	}
+
 
 	TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum,
 									   reln->smgr_rnode.node.spcNode,

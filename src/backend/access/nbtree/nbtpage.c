@@ -426,13 +426,18 @@ _bt_checkpage(Relation rel, Buffer buf)
 	 * case, however.
 	 */
 	if (PageIsNew(page))
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		xp_stack_trace(10, tv);
+
 		ereport(ERROR,
 				(errcode(ERRCODE_INDEX_CORRUPTED),
 			 errmsg("index \"%s\" contains unexpected zero page at block %u",
 					RelationGetRelationName(rel),
 					BufferGetBlockNumber(buf)),
 				 errhint("Please REINDEX it.")));
-
+	}
 	/*
 	 * Additionally check that the special area looks sane.
 	 */

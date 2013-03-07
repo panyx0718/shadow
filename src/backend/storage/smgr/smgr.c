@@ -879,14 +879,7 @@ update_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
 									&found);
 	if(action == HASH_REMOVE)
 		return;
-/*
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        ereport(WARNING,
-                        (errmsg("UpdateLSN:%ld.%ld\t%u\t%u\t%u\t%u\t%u\tupdated:%u.%u",
-                        tv.tv_sec, tv.tv_usec, rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blocknum,
-                        lsn.xlogid, lsn.xrecoff)));
-*/
+
 	if(val != NULL)
 		memcpy(&(val->header), header, sizeof(PageHeaderData));
 	else if(action == HASH_ENTER_NULL)
@@ -1187,7 +1180,7 @@ sync_block(FlushRequest request, int client_s)
 		page = (Page) BufferGetPage(buf);
 		pageLSN = PageGetLSN(page);
 
-		if(!XLByteEQ(pageLSN, request.lsn))
+		if(!XLByteEQ(pageLSN, request.lsn) && request.lsn.xrecoff != 0)
 		{
 			ereport(WARNING,
 					(errmsg("Block LSN not match: rnode:%u\tblocknum:%u\trequested:%u.%u\tpageLSN:%u.%u",
@@ -1201,7 +1194,7 @@ sync_block(FlushRequest request, int client_s)
 					request.blocknum, request.lsn.xlogid, request.lsn.xrecoff,
 					xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
 
-		//PageSetLSN(page, request.lsn);
+		PageSetLSN(page, request.lsn);
 		write(client_s, (char*)page, BLCKSZ);
 
 		UnlockReleaseBuffer(buf);

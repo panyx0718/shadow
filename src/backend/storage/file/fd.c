@@ -1404,7 +1404,12 @@ FileSeek(File file, off_t offset, int whence)
                                 {
                                                 VfdCache[file].seekPos = lseek(VfdCache[file].fd, offset, whence);
                                                 if(primary_mode && VfdCache[file].seekPos != offset)
-                                                        VfdCache[file].seekPos = offset;
+                                                {
+                                        			ereport(WARNING,
+                                        					(errmsg("OffsetHelper:%ld", offset)));
+                                        			VfdCache[file].seekPos = offset;
+                                                }
+
                                 }
 
 				break;
