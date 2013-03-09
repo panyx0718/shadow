@@ -531,18 +531,12 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		char *filename = FilePathName(v->mdfd_vfd);
 		if(is_tracked(filename))
 		{
-			if(!PageIsNew(buffer))
-			{
-				struct timeval tv;
-				gettimeofday(&tv, NULL);
-				xp_stack_trace(10, tv);
-				ereport(ERROR,
-						(errmsg("ExtendBlockNotNew:rnode:%u\tblocknum:%u",
-								reln->smgr_rnode.node.relNode, blocknum)));
-			}
 			((PageHeader)buffer)->pd_lsn.xrecoff = 1;
 			update_block_header(reln->smgr_rnode.node, forknum, blocknum, (PageHeader)buffer, HASH_ENTER_NULL);
 			modify_last_block_hash(filename, (seekpos + BLCKSZ) / BLCKSZ, HASH_ENTER_NULL);
+			ereport(TRACE_LEVEL,
+					(errmsg("ExtendBlock:rnode:%u\tblocknum:%u",
+							reln->smgr_rnode.node.relNode, blocknum)));
 		}
 	}
 

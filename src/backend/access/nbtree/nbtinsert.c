@@ -1115,11 +1115,15 @@ _bt_split(Relation rel, Buffer buf, OffsetNumber firstright,
 		sopaque = (BTPageOpaque) PageGetSpecialPointer(spage);
 		if (sopaque->btpo_prev != origpagenumber)
 		{
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			xp_stack_trace(10, tv);
+
 			memset(rightpage, 0, BufferGetPageSize(rbuf));
 			elog(ERROR, "right sibling's left-link doesn't match: "
-			   "block %u links to %u instead of expected %u in index \"%s\"",
+			   "block %u links to %u instead of expected %u in index \"%s\", rnode:%u\tblocknum:%u",
 				 oopaque->btpo_next, sopaque->btpo_prev, origpagenumber,
-				 RelationGetRelationName(rel));
+				 RelationGetRelationName(rel), rel->rd_node.relNode, oopaque->btpo_next);
 		}
 
 		/*

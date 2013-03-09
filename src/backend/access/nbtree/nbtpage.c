@@ -1194,10 +1194,17 @@ _bt_pagedel(Relation rel, Buffer buf, BTStack stack)
 	page = BufferGetPage(rbuf);
 	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 	if (opaque->btpo_prev != target)
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		xp_stack_trace(10, tv);
+
 		elog(ERROR, "right sibling's left-link doesn't match: "
-			 "block %u links to %u instead of expected %u in index \"%s\"",
+			 "block %u links to %u instead of expected %u in index \"%s\", rnode:%u\tblocknum:%u",
 			 rightsib, opaque->btpo_prev, target,
-			 RelationGetRelationName(rel));
+			 RelationGetRelationName(rel), rel->rd_node.relNode, rightsib);
+	}
+
 
 	/*
 	 * Any insert which would have gone on the target block will now go to the
