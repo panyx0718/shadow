@@ -533,10 +533,14 @@ mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 		{
 			((PageHeader)buffer)->pd_lsn.xrecoff = 1;
 			update_block_header(reln->smgr_rnode.node, forknum, blocknum, (PageHeader)buffer, HASH_ENTER_NULL);
+			BlockNumber oldblocknum = get_last_block_hash(filename, HASH_FIND);
+			BlockNumber newblocknum = (seekpos + BLCKSZ) / BLCKSZ;
+			if(newblocknum - oldblocknum != 1)
+				ereport(TRACE_LEVEL,
+						(errmsg("WrongExtend:rnode:%u\tnewblocknum:%u\toldblocknum:%u\tblocknum:%u",
+								reln->smgr_rnode.node.relNode, newblocknum, oldblocknum, blocknum)));
 			modify_last_block_hash(filename, (seekpos + BLCKSZ) / BLCKSZ, HASH_ENTER_NULL);
-			ereport(TRACE_LEVEL,
-					(errmsg("ExtendBlock:rnode:%u\tblocknum:%u",
-							reln->smgr_rnode.node.relNode, blocknum)));
+
 		}
 	}
 
@@ -751,14 +755,15 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
 			}
-			update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
+			else
+				update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);
 		}
 		else if(!found && PageIsNew(buffer))
 		{
 			ereport(WARNING,
 					(errmsg("WrongPage:rnode:%u\tblocknum:%u",
 							reln->smgr_rnode.node.relNode, blocknum)));
-
+/*
 			network_sync(buffer, reln->smgr_rnode.node, forknum, blocknum, lsn, true);
 
 			gettimeofday(&tv, NULL);
@@ -766,7 +771,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 			ereport(TRACE_LEVEL,
 				(errmsg("getFreshBlock:%ld.%ld:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
 						tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
-						blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
+						blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));*/
 		}
 	}
 
