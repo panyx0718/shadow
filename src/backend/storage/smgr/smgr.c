@@ -30,6 +30,17 @@
 #include "miscadmin.h"
 #include "replication/walsender_private.h"
 #include "access/xlogutils.h"
+
+#include <stdlib.h> /* for exit() */
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h> /* memset() */
+#include <sys/time.h> /* select() */
 /*
  * This struct of function pointers defines the API between smgr.c and
  * any individual storage manager module.  Note that smgr subfunctions are
@@ -90,10 +101,10 @@ static HTAB *SMgrRelationHash = NULL;
 
 static SMgrRelation first_unowned_reln = NULL;
 
-HTAB *LastBlockHash = NULL;
-HTAB *BlockLSNHash = NULL;
 static int primary_s = -1;
 static int standby_s = -1;
+HTAB *LastBlockHash = NULL;
+HTAB *BlockLSNHash = NULL;
 XLogApply xlog_apply = NULL;
 
 /* local function prototypes */
@@ -921,28 +932,35 @@ get_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, Pa
 	}
 }
 
+int isReadable(int sd, int timeOut) { // milliseconds
+  fd_set read_set;
+  struct timeval tv;
+
+  FD_ZERO(&read_set);
+  FD_SET(sd,&read_set);
+
+  if (timeOut) {
+    tv.tv_sec  = timeOut / 1000;
+    tv.tv_usec = (timeOut % 1000) * 1000;
+  } else {
+    tv.tv_sec  = 0;
+    tv.tv_usec = 0;
+  }
+  if (select(sd+1,&read_set,0,0,&tv) < 0) {
+    return 0;
+  }
+
+  return FD_ISSET(sd,&read_set) != 0;
+}
 
 void
 network_sync(char* buffer, RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush)
 {
-	struct sockaddr_in addr;
-	FlushRequest request;
-	int rp = 0;
+	static struct sockaddr_in primary_addr;
+	static struct sockaddr_in standby_addr;
+	int addr_len = sizeof(standby_addr);
 	int ret = 0;
-	int cnt = 0;
-	static long timeout = 100000;
-
-retry:
-	rp = 0;
-	ret = 0;
-
-	if((primary_s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-		ereport(FATAL,
-				(errmsg("Unable to create socket")));
-
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(flush_req_port);
+	FlushRequest request;
 
 	if(WalSndCtl == NULL)
 	{
@@ -957,13 +975,27 @@ retry:
 					(errmsg("WalSndCtl not initiated")));
 	}
 
-	if(inet_aton(WalSndCtl->standby_addr, &addr.sin_addr) == 0)
-		ereport(FATAL,
-				(errmsg("Unable to inet_aton")));
-	if(connect(primary_s, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-	{
-		ereport(ERROR,
-				(errmsg("Unable to connect to server")));
+	if(primary_s < 0) {
+		if((primary_s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+			ereport(FATAL,
+					(errmsg("Unable to create socket")));
+
+		primary_addr.sin_family = AF_INET;
+		primary_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		primary_addr.sin_port = htons(0);
+
+		if(bind(primary_s, (struct sockaddr *)&primary_addr, sizeof(primary_addr)) < 0) {
+			ereport(FATAL,
+					(errmsg("Unable to bind")));
+		}
+
+		memset(&standby_addr, 0, sizeof(standby_addr));
+		standby_addr.sin_family = AF_INET;
+		standby_addr.sin_port = htons(flush_req_port);
+
+		if(inet_aton(WalSndCtl->standby_addr, &standby_addr.sin_addr) == 0)
+			ereport(FATAL,
+					(errmsg("Unable to inet_aton: %s", strerror(errno))));
 	}
 
 	request.rnode = rnode;
@@ -972,35 +1004,21 @@ retry:
 	request.lsn = lsn;
 	request.flush = flush+'0';
 
-	if(write(primary_s, &request, req_len) < 0)
-		ereport(ERROR,
-				(errmsg("Unable to send")));
-	/* read the block back */
-	while(rp != BLCKSZ)
+	if(sendto(primary_s, &request, req_len, 0, &standby_addr, addr_len) < 0)
 	{
-		ret = read(primary_s, (char*)buffer + rp, BLCKSZ - rp);
-		if(ret <= 0)
-		{
-			if(cnt == 5)
-				ereport(ERROR,
-						(errmsg("Unable to read the block: %d", rp)));
-			else
-			{
-				ereport(WARNING,
-						(errmsg("retry: %d", cnt++)));
-				close(primary_s);
-				pg_usleep(timeout);
-				if(timeout < 4000000)
-					timeout += timeout;
-				goto retry;
-			}
-		}
-		rp += ret;
+		primary_s = -1;
+		ereport(ERROR,
+				(errmsg("Unable to send: %s", strerror(errno))));
 	}
-	if(cnt == 0 && timeout > 100000)
-		timeout -= 100000;
-
-	close(primary_s);
+	if(isReadable(primary_s, 100)) {
+		ret = recvfrom(primary_s, (char*)buffer, BLCKSZ, 0, &standby_addr, &addr_len);
+	}
+	if(ret != BLCKSZ)
+	{
+		primary_s = -1;
+		ereport(ERROR,
+				(errmsg("Unable to get block: %u", blocknum)));
+	}
 }
 
 void shutdownHandler()
@@ -1022,18 +1040,11 @@ void shutdownHandler2()
 void
 get_block_info()
 {
-	struct sockaddr_in server_addr;
-	const int max_client = 30;
-	int clients[max_client];
-	int clients_t[max_client];
-	int client_s;
-	int max_s;
-	int i;
-	ssize_t ret;
-	fd_set read_set;
-	struct timeval timer;
+	struct sockaddr_in primary_addr;
+	static struct sockaddr_in standby_addr;
+	int addr_len = sizeof(primary_addr);
 	FlushRequest request;
-	int cnt = 0;
+	int ret = 0;
 
 	pqsignal(SIGTERM, shutdownHandler);	/* request shutdown */
 	pqsignal(SIGQUIT, shutdownHandler);	/* hard crash time */
@@ -1049,44 +1060,23 @@ get_block_info()
 				(errmsg("Xlog Apply not inited by walreceiver")));
 	}
 
-retry:
-	/* init server socket */
-	if((standby_s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-		ereport(FATAL,
-				(errmsg("Unable to create socket")));
+	if(standby_s < 0) {
+		if((standby_s = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+			ereport(FATAL,
+					(errmsg("Unable to create socket")));
 
-	memset(&server_addr, 0, sizeof(server_addr));
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(flush_req_port);
-	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		memset(&standby_addr, 0, sizeof(standby_addr));
+		standby_addr.sin_family = AF_INET;
+		standby_addr.sin_port = htons(flush_req_port);
+		standby_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-	if(bind(standby_s, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
-	{
-		ereport(WARNING,
-				(errmsg("Unable to bind: %s", strerror(errno))));
-		pg_usleep(1000000);
-		if(cnt++ == 5)
-			kill(getpid(), SIGTERM);
-		else
+		if(bind(standby_s, (struct sockaddr *)&standby_addr, sizeof(standby_addr)) < 0)
 		{
-			close(standby_s);
-			goto retry;
+			ereport(FATAL,
+					(errmsg("Unable to bind: %s", strerror(errno))));
 		}
 	}
 
-	if(listen(standby_s, 10) < 0)
-	{
-		ereport(FATAL,
-				(errmsg("Unable to listen")));
-		kill(getpid(), SIGTERM);
-	}
-
-	max_s = standby_s;
-	for(i = 0; i < max_client; i++)
-	{
-		clients[i] = 0;
-		clients_t[i] = 0;
-	}
 
 	/* start the loop to receive primary request */
 	while(1)
@@ -1095,76 +1085,29 @@ retry:
 		if (getppid() == 1)
 			kill(getpid(), SIGTERM);
 
-		FD_ZERO(&read_set);
-		FD_SET(standby_s, &read_set);
-		for(i = 0; i < max_client; i++)
-			if(clients[i] > 0)
-				FD_SET(clients[i], &read_set);
-
-		timer.tv_sec = 1;
-		timer.tv_usec = 0;
-
-		ret = select(max_s+3, &read_set, NULL, NULL, &timer);
-		if(ret < 0)
-			kill(getpid(), SIGTERM);
-		else if(ret == 0)
-			continue;
-
-		if(FD_ISSET(standby_s, &read_set))
-		{
-			client_s = accept(standby_s, (struct sockaddr *)NULL, NULL);
-
-			i = 0;
-			for(; i < max_client; i++)
-			{
-				if(clients[i] == 0)
-				{
-					clients[i] = client_s;
-					clients_t[i] = 10;
-					break;
-				}
+		if(isReadable(standby_s, 100)) {
+			if((ret = recvfrom(standby_s, &request, req_len, 0, (struct sockaddr*)&primary_addr, &addr_len)) != req_len) {
+				ereport(WARNING,
+						(errmsg("Wrong request size: %d,%s", ret, strerror(errno))));
 			}
-			if(i == max_client)
-				close(client_s);
-			else if(max_s < client_s)
-				max_s = client_s;
-		}
-
-		for(i = 0; i < max_client; i++)
-		{
-			if(FD_ISSET(clients[i], &read_set))
+			if(request.flush-'0' != 0)
 			{
-				ret = read(clients[i], &request, req_len);
-				if(ret == req_len && request.flush-'0' != 0)
+				if(XLByteLT(xlog_apply->apply, request.lsn))
 				{
-					if(XLByteLT(xlog_apply->apply, request.lsn))
-					{
-						ereport(WARNING,
-								(errmsg("DelaySync: rnode:%u\tblocknum:%u\trequested:%u.%u, applied:%u.%u",
-								request.rnode.relNode, request.blocknum,
-								request.lsn.xlogid, request.lsn.xrecoff, xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
-					}
-					else
-						sync_block(request, clients[i]);
+					ereport(WARNING,
+							(errmsg("DelaySync: rnode:%u\tblocknum:%u\trequested:%u.%u, applied:%u.%u",
+							request.rnode.relNode, request.blocknum,
+							request.lsn.xlogid, request.lsn.xrecoff, xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
 				}
-				close(clients[i]);
-				clients[i] = 0;
-			}
-			else if(clients[i] > 0)
-			{
-				clients_t[i]--;
-				if(clients_t[i] < 0)
-				{
-					close(clients[i]);
-					clients[i] = 0;
-				}
+				else
+					sync_block(request, &primary_addr);
 			}
 		}
 	}
 }
 
 void
-sync_block(FlushRequest request, int client_s)
+sync_block(FlushRequest request, struct sockaddr_in* primary_addr)
 {
 	Buffer buf;
 	Page page;
@@ -1195,7 +1138,9 @@ sync_block(FlushRequest request, int client_s)
 					xlog_apply->apply.xlogid, xlog_apply->apply.xrecoff)));
 
 		PageSetLSN(page, request.lsn);
-		write(client_s, (char*)page, BLCKSZ);
+		if(sendto(standby_s, (char*)page, BLCKSZ, 0, primary_addr, sizeof(*primary_addr)) < 0)
+			ereport(WARNING,
+					(errmsg("Unable to send: %s", strerror(errno))));
 
 		UnlockReleaseBuffer(buf);
 	}
@@ -1208,3 +1153,4 @@ clean_standby_resources()
 			(errmsg("Clean up standby resources")));
 	unlink("pg_tmp/standby_mode");
 }
+

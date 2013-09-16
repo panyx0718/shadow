@@ -747,6 +747,7 @@ mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 					(errmsg("getFreshBlock:%ld.%ld:\trnode:%u\tblocknum:%u\tfreshLSN:%u.%u",
 							tv.tv_sec, tv.tv_usec, reln->smgr_rnode.node.relNode,
 							blocknum, cur_lsn.xlogid, cur_lsn.xrecoff)));
+				nbytes = BLCKSZ;
 			}
 			else
 				update_block_header(reln->smgr_rnode.node, forknum, blocknum, NULL, HASH_REMOVE);

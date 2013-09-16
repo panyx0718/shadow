@@ -37,7 +37,7 @@ MAJORVERSION = 9.2
 
 # Support for VPATH builds
 vpath_build = no
-abs_top_srcdir = /home/x23pan/workspace/c/pg922
+abs_top_srcdir = /home/ec2user/pg_hack/logdb
 
 ifneq ($(vpath_build),yes)
 top_srcdir = $(top_builddir)
@@ -51,7 +51,7 @@ endif
 vpathsearch = `for f in $(addsuffix /$(1),$(subst :, ,. $(VPATH))); do test -r $$f && echo $$f && break; done`
 
 # Saved arguments from configure
-configure_args =  '--prefix=/home/x23pan/workspace/c/pg922'
+configure_args =  '--prefix=/home/ec2user/pg_hack/logdb'
 
 
 ##########################################################################
@@ -71,7 +71,7 @@ ifndef PGXS
 # Note that prefix, exec_prefix, and datarootdir aren't defined in a PGXS build;
 # makefiles may only use the derived variables such as bindir.
 
-prefix := /home/x23pan/workspace/c/pg922
+prefix := /home/ec2user/pg_hack/logdb
 exec_prefix := ${prefix}
 datarootdir := ${prefix}/share
 
@@ -276,7 +276,7 @@ perl_embed_ldflags	=
 
 # Miscellaneous
 
-AWK	= gawk
+AWK	= mawk
 LN_S	= ln -s
 MSGFMT  = 
 MSGMERGE = 
@@ -317,7 +317,7 @@ DOCBOOKSTYLE	=
 JADE			= 
 NSGMLS			= 
 OSX				= 
-XSLTPROC		= xsltproc
+XSLTPROC		= 
 
 # Code coverage
 

@@ -178,7 +178,7 @@ extern bool get_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber 
 
 extern void network_sync(char* buffer, RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, XLogRecPtr lsn, bool flush);
 extern void get_block_info();
-extern void sync_block(FlushRequest request, int client_s);
+extern void sync_block(FlushRequest request, struct sockaddr_in* primary_addr);
 extern void clean_standby_resources();
 extern Size BlockLSNSize();
 /* internals: move me elsewhere -- ay 7/94 */
@@ -218,3 +218,4 @@ extern Datum smgreq(PG_FUNCTION_ARGS);
 extern Datum smgrne(PG_FUNCTION_ARGS);
 
 #endif   /* SMGR_H */
+
