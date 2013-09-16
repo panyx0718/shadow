@@ -62,6 +62,10 @@
 #include "pg_trace.h"
 
 
+static char *HATriggerDir = NULL;
+static char *SharedLogDir = NULL;
+static bool triggered = false;
+
 /* File path names (all relative to $PGDATA) */
 #define RECOVERY_COMMAND_FILE	"recovery.conf"
 #define RECOVERY_COMMAND_DONE	"recovery.done"
@@ -609,6 +613,8 @@ typedef struct xl_restore_point
 	char		rp_name[MAXFNAMELEN];
 } xl_restore_point;
 
+static void UpdateDir(void);
+static void SetupTrigger(void);
 
 static void XLogArchiveNotify(const char *xlog);
 static void XLogArchiveNotifySeg(uint32 log, uint32 seg);
@@ -4200,7 +4206,7 @@ next_record_is_invalid:
 	}
 
 	/* In standby-mode, keep trying */
-	if (StandbyMode)
+	if (StandbyMode && !triggered)
 		goto retry;
 	else
 		return NULL;
@@ -5607,11 +5613,30 @@ readRecoveryCommandFile(void)
 					(errmsg_internal("trigger_file = '%s'",
 									 TriggerFile)));
 		}
+		else if (strcmp(item->name, "ha_trigger_dir") == 0)
+		{
+			HATriggerDir = pstrdup(item->value);
+			ereport(DEBUG2,
+					(errmsg_internal("ha_trigger_dir = '%s'", HATriggerDir)));
+		}
+		else if (strcmp(item->name, "shared_log_dir") == 0)
+		{
+			SharedLogDir = pstrdup(item->value);
+			ereport(DEBUG2,
+					(errmsg_internal("shared_log_dir = '%s'", SharedLogDir)));
+		}
 		else
 			ereport(FATAL,
 					(errmsg("unrecognized recovery parameter \"%s\"",
 							item->name)));
 	}
+
+	if(SharedLogDir == NULL)
+		ereport(FATAL,
+				(errmsg("shared log dir not specified in recovery.conf")));
+	if(HATriggerDir == NULL)
+		ereport(FATAL,
+			(errmsg("ha trigger file dir not specified in recovery.conf")));
 
 	/*
 	 * Check for compulsory parameters
@@ -6662,6 +6687,14 @@ StartupXLOG(void)
 
 			/* init global replay position */
 			xlog_apply = ShmemInitStruct("xlog apply", sizeof(XLogApplyData), &found);
+
+
+			/* setup trigger files: primary_mode, standby_mode at primary and secondary respectively.
+			/* this must be enable before standby wants to write anything. This makes sure the Primary
+			 * wouldn't write anything stale after the standby has done some updates.
+			 */
+			SetupTrigger();
+
 			/*
 			 * main redo apply loop
 			 */
@@ -6993,6 +7026,9 @@ StartupXLOG(void)
 	/* Pre-scan prepared transactions to find out the range of XIDs present */
 	oldestActiveXID = PrescanPreparedTransactions(NULL, NULL);
 
+	if(triggered)
+		UpdateDir();
+
 	/*
 	 * Update full_page_writes in shared memory and write an XLOG_FPW_CHANGE
 	 * record before resource manager writes cleanup WAL records or checkpoint
@@ -7025,7 +7061,6 @@ StartupXLOG(void)
 
 		/* Disallow XLogInsert again */
 		LocalXLogInsertAllowed = -1;
-
 		/*
 		 * Perform a checkpoint to update all our recovery activity to disk.
 		 *
@@ -7151,6 +7186,61 @@ StartupXLOG(void)
 	}
 }
 
+static void
+UpdateDir(void)
+{
+	char cmd[256];
+
+	ereport(WARNING,
+			(errmsg("Moving new primary's logs to shared logs."
+					"We are using the linux shell commands for simplicity")));
+
+	if(system("rm -rf pg_xlog") < 0)
+		ereport(FATAL, (errmsg("Cannot clean up primary local logs")));;
+
+	if(symlink(SharedLogDir, "pg_xlog") < 0)
+		ereport(FATAL, (errmsg("Cannot link primary logs to shared logs")));;
+}
+
+static void
+SetupTrigger(void)
+{
+	char *token;
+	char host[129], user[129], conninfo[MAXCONNINFO], cmd[256];
+	struct timeval tv;
+
+	if(!PrimaryConnInfo)
+		ereport(FATAL, (errmsg("recovery.conf miss PrimaryConnInfo")));
+
+	strlcpy(conninfo, PrimaryConnInfo, MAXCONNINFO);
+	host[0] = user[0] = '\0';
+	token = strtok(conninfo, " ");
+	while(token)
+	{
+		if(strstr(token, "host=") != NULL && strlen(token) > 5)
+			strcpy(host, token+5);
+		else if(strstr(token, "user=" ) != NULL && strlen(token) > 5)
+			strcpy(user, token+5);
+
+		token = strtok(NULL, " ");
+	}
+	if(strlen(host) == 0 || strlen(user) == 0)
+		ereport(FATAL, (errmsg("Primary Addr and Username required")));
+
+	sprintf(cmd, "ssh %s@%s \"touch %s/primary_mode\"", user, host, HATriggerDir);
+	/* This test is not working */
+	if(system(cmd) < 0)
+		ereport(FATAL, (errmsg("Cannot create trigger: %s", cmd)));
+
+	if(system("touch pg_tmp/standby_mode") < 0)
+		ereport(FATAL, (errmsg("Cannot create trigger: pg_tmp/standby_mode")));
+
+	/* debugging output */
+	gettimeofday(&tv, NULL);
+	ereport(WARNING,
+		(errmsg("Primary Addr: %s\tUsername: %s\tHA Trigger Dir: %s\tShared Log Dir: %s",
+		host, user, HATriggerDir, SharedLogDir)));
+}
 /*
  * Checks if recovery has reached a consistent state. When consistency is
  * reached and we have a valid starting standby snapshot, tell postmaster
@@ -10585,7 +10675,6 @@ static bool
 CheckForStandbyTrigger(void)
 {
 	struct stat stat_buf;
-	static bool triggered = false;
 
 	if (triggered)
 		return true;

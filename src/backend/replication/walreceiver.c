@@ -287,13 +287,12 @@ WalReceiverMain(void)
 
 
 		/* xp. start standby mode */
-
-		/* primary trigger file for other process */
+		/* primary trigger file for other process
 		int fd = BasicOpenFile("pg_tmp/standby_mode",
 								   O_WRONLY | O_CREAT | PG_BINARY,
 								   S_IRUSR | S_IWUSR);
 		close(fd);
-
+*/
 		struct timeval tv;
 		gettimeofday(&tv, NULL);
 		ereport(WARNING,

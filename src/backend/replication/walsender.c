@@ -734,17 +734,16 @@ WalSndLoop(void)
 	/* Initialize the last reply timestamp */
 	last_reply_timestamp = GetCurrentTimestamp();
 
-
-
+	strcpy(WalSndCtl->standby_addr, MyProcPort->remote_host);
+	/*
 	if(access("pg_tmp/primary_mode", F_OK) != 0)
 	{
-		/* xp. start high avail mode */
+
 		strcpy(WalSndCtl->standby_addr, MyProcPort->remote_host);
 
 		LastBlockHash = init_last_block_hash();
 		BlockLSNHash = init_block_lsn_hash();
 
-		/* primary trigger file for other process */
 		int fd = BasicOpenFile("pg_tmp/primary_mode",
 							   O_WRONLY | O_CREAT | PG_BINARY,
 							   S_IRUSR | S_IWUSR);
@@ -756,7 +755,7 @@ WalSndLoop(void)
 				(errmsg("%ld:%ld\tStartHighAavail\tstandby_mode:%c\tprimary_mode:%c\tLastBlockHash:%p\tBlockLSNHash:%p\tStandby:%s",
 						tv.tv_sec, tv.tv_usec, is_standby_mode()+'0', is_primary_mode()+'0',
 						LastBlockHash, BlockLSNHash, WalSndCtl->standby_addr)));
-	}
+	}*/
 
 
 	/* Loop forever, unless we get an error */
