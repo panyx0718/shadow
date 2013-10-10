@@ -6690,7 +6690,7 @@ StartupXLOG(void)
 
 
 			/* setup trigger files: primary_mode, standby_mode at primary and secondary respectively.
-			/* this must be enable before standby wants to write anything. This makes sure the Primary
+			 * this must be enable before standby wants to write anything. This makes sure the Primary
 			 * wouldn't write anything stale after the standby has done some updates.
 			 */
 			SetupTrigger();
@@ -7189,8 +7189,6 @@ StartupXLOG(void)
 static void
 UpdateDir(void)
 {
-	char cmd[256];
-
 	ereport(WARNING,
 			(errmsg("Moving new primary's logs to shared logs."
 					"We are using the linux shell commands for simplicity")));
@@ -7209,8 +7207,11 @@ SetupTrigger(void)
 	char host[129], user[129], conninfo[MAXCONNINFO], cmd[256];
 	struct timeval tv;
 
-	if(!PrimaryConnInfo)
-		ereport(FATAL, (errmsg("recovery.conf miss PrimaryConnInfo")));
+	if(!PrimaryConnInfo) {
+		ereport(WARNING, (errmsg("recovery.conf miss PrimaryConnInfo. Probably the Primary node")));
+		return;
+	}
+
 
 	strlcpy(conninfo, PrimaryConnInfo, MAXCONNINFO);
 	host[0] = user[0] = '\0';
@@ -7227,6 +7228,7 @@ SetupTrigger(void)
 	if(strlen(host) == 0 || strlen(user) == 0)
 		ereport(FATAL, (errmsg("Primary Addr and Username required")));
 
+	ereport(WARNING, (errmsg("ssh %s@%s \"touch %s/primary_mode\"", user, host, HATriggerDir)));
 	sprintf(cmd, "ssh %s@%s \"touch %s/primary_mode\"", user, host, HATriggerDir);
 	/* This test is not working */
 	if(system(cmd) < 0)
