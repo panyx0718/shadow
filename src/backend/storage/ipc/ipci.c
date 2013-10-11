@@ -251,4 +251,7 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 	 */
 	if (shmem_startup_hook)
 		shmem_startup_hook();
+
+	init_block_lsn_hash();
+	init_last_block_hash();
 }

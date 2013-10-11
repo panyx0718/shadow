@@ -284,6 +284,11 @@ ShmemInitHash(const char *name, /* table string name for shmem index */
 	if (found)
 		hash_flags |= HASH_ATTACH;
 
+	if(strcmp(name, "block lsn") == 0 || strcmp(name, "relation last block") == 0) {
+		ereport(WARNING,
+				(errmsg("block lsn hash found: %c", found+'0')));
+	}
+
 	/* Pass location of hashtable header to hash_create */
 	infoP->hctl = (HASHHDR *) location;
 

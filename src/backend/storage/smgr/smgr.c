@@ -103,8 +103,8 @@ static SMgrRelation first_unowned_reln = NULL;
 
 static int primary_s = -1;
 static int standby_s = -1;
-HTAB *LastBlockHash = NULL;
-HTAB *BlockLSNHash = NULL;
+HTAB* LastBlockHash = NULL;
+HTAB* BlockLSNHash = NULL;
 XLogApply xlog_apply = NULL;
 
 /* local function prototypes */
@@ -750,6 +750,7 @@ is_tracked(char *filename)
 HTAB*
 init_last_block_hash()
 {
+	HTAB* hash = NULL;
 	HASHCTL info;
 	int hash_flags;
 	long init_table_size = LASTBLOCKHASHSIZE;
@@ -763,11 +764,21 @@ init_last_block_hash()
 	info.entrysize = sizeof(RelLastBlockData);
 	hash_flags = HASH_ELEM;
 
-	return ShmemInitHash("relation last block",
+	hash = ShmemInitHash("relation last block",
 								init_table_size,
 								max_table_size,
 								&info,
 								hash_flags);
+
+	if(hash == NULL) {
+		ereport(PANIC,
+				(errmsg("cannot attach to last_block_hash")));
+	} else {
+		ereport(WARNING,
+				(errmsg("get_last_block_hash: LastBlockHash:%p", hash)));
+	}
+
+	return hash;
 }
 
 void
@@ -780,11 +791,7 @@ modify_last_block_hash(char *filename, BlockNumber blocknum, HASHACTION action)
 
 
 	if(LastBlockHash == NULL)
-	{
 		LastBlockHash = init_last_block_hash();
-		ereport(TRACE_LEVEL,
-				(errmsg("modify_last_block_hash:LastBlockHash:%p", LastBlockHash)));
-	}
 
 	strcpy(rel_name.filename, filename);
 	val = (RelLastBlock) hash_search(LastBlockHash,
@@ -814,12 +821,7 @@ get_last_block_hash(char *filename, HASHACTION action)
 	RelLastBlock val;
 
 	if(LastBlockHash == NULL)
-	{
 		LastBlockHash = init_last_block_hash();
-		ereport(TRACE_LEVEL,
-				(errmsg("get_last_block_hash: LastBlockHash:%p", LastBlockHash)));
-		return InvalidBlockNumber;
-	}
 
 	strcpy(rel_name.filename, filename);
 	val = (RelLastBlock) hash_search(LastBlockHash,
@@ -844,21 +846,30 @@ Size BlockLSNSize()
 HTAB*
 init_block_lsn_hash()
 {
+	HTAB*		hash;
 	HASHCTL		info;
 	info.keysize = sizeof(BlockTag);
 	info.entrysize = sizeof(BlockLSNData);
 	info.num_partitions = 16;
 	long init_size = BLOCKLSNHASHSIZE;
 	long max_size = init_size;
+	struct timeval tv;
+
 	info.hash = tag_hash;
-
-	if(BlockLSNHash != NULL)
-		return BlockLSNHash;
-
-	return ShmemInitHash("block lsn",
+	hash =  ShmemInitHash("block lsn",
 							init_size, max_size,
 							&info,
 							HASH_ELEM | HASH_PARTITION | HASH_FUNCTION);
+	if(hash == NULL) {
+		ereport(PANIC,
+				(errmsg("cannot init block_lsn_hash")));
+	} else {
+		gettimeofday(&tv, NULL);
+		xp_stack_trace(TRACE_SIZE, tv);
+		ereport(WARNING,
+				(errmsg("get_block_lsn_hash: LastBlockHash:%p", hash)));
+	}
+	return hash;
 }
 
 /**
@@ -875,11 +886,7 @@ update_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
 	BlockLSN val;
 
 	if(BlockLSNHash == NULL)
-	{
 		BlockLSNHash = init_block_lsn_hash();
-		ereport(TRACE_LEVEL,
-				(errmsg("update_block_lsn:BlockLSNHash:%p", BlockLSNHash)));
-	}
 
 	blk_tag.rnode = rnode;
 	blk_tag.forkno = forknum;
@@ -906,11 +913,7 @@ get_block_header(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum, Pa
 	BlockLSN val;
 
 	if(BlockLSNHash == NULL)
-	{
 		BlockLSNHash = init_block_lsn_hash();
-		ereport(TRACE_LEVEL,
-				(errmsg("get_block_lsn:BlockLSNHash:%p", BlockLSNHash)));
-	}
 
 	blk_tag.rnode = rnode;
 	blk_tag.blkno = blocknum;
