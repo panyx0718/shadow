@@ -506,8 +506,12 @@ CheckpointerMain(void)
 				CreateCheckPoint(flags);
 				ckpt_performed = true;
 			}
-			else
+			else {
 				ckpt_performed = CreateRestartPoint(flags);
+				ereport(WARNING,
+					  (errmsg("Create restart point, %c", ckpt_performed+'0')));
+			}
+
 
 			/*
 			 * After any checkpoint, close all smgr files.	This is so we

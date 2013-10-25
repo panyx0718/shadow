@@ -163,6 +163,7 @@ extern void smgrsync(void);
 extern void smgrpostckpt(void);
 extern void AtEOXact_SMgr(void);
 
+extern bool is_stop_log_truncate();
 extern bool is_primary_mode();
 extern bool is_standby_mode();
 extern bool is_tracked(char *filename);

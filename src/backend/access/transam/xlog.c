@@ -62,9 +62,9 @@
 #include "pg_trace.h"
 
 
-static char *HATriggerDir = NULL;
-static char *SharedLogDir = NULL;
-static bool triggered = false;
+char *HATriggerDir = NULL;
+char *SharedLogDir = NULL;
+bool triggered = false;
 
 /* File path names (all relative to $PGDATA) */
 #define RECOVERY_COMMAND_FILE	"recovery.conf"
@@ -3498,6 +3498,7 @@ RemoveOldXlogFiles(uint32 log, uint32 seg, XLogRecPtr endptr)
 	struct dirent *xlde;
 	char		lastoff[MAXFNAMELEN];
 	char		path[MAXPGPATH];
+	char		tmppath[MAXPGPATH];
 
 #ifdef WIN32
 	char		newpath[MAXPGPATH];
@@ -3520,7 +3521,7 @@ RemoveOldXlogFiles(uint32 log, uint32 seg, XLogRecPtr endptr)
 
 	XLogFileName(lastoff, ThisTimeLineID, log, seg);
 
-	elog(DEBUG2, "attempting to remove WAL segments older than log file %s",
+	elog(WARNING, "attempting to remove WAL segments older than log file %s",
 		 lastoff);
 
 	while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL)
@@ -3557,9 +3558,18 @@ RemoveOldXlogFiles(uint32 log, uint32 seg, XLogRecPtr endptr)
 					InstallXLogFileSegment(&endlogId, &endlogSeg, path,
 										   true, &max_advance, true))
 				{
-					ereport(DEBUG2,
-							(errmsg("recycled transaction log file \"%s\"",
-									xlde->d_name)));
+					if (is_standby_mode() && !triggered) {
+						if(SharedLogDir == NULL) {
+							readRecoveryCommandFile();
+						}
+						snprintf(tmppath, MAXPGPATH, "%s/%s", SharedLogDir, xlde->d_name);
+						unlink(tmppath);
+
+						ereport(WARNING,
+								(errmsg("recycled transaction log file \"%s\" and %s",
+										xlde->d_name, tmppath)));
+					}
+
 					CheckpointStats.ckpt_segs_recycled++;
 					/* Needn't recheck that slot on future iterations */
 					if (max_advance > 0)
@@ -3573,7 +3583,7 @@ RemoveOldXlogFiles(uint32 log, uint32 seg, XLogRecPtr endptr)
 					/* No need for any more future segments... */
 					int			rc;
 
-					ereport(DEBUG2,
+					ereport(WARNING,
 							(errmsg("removing transaction log file \"%s\"",
 									xlde->d_name)));
 
@@ -7228,14 +7238,35 @@ SetupTrigger(void)
 	if(strlen(host) == 0 || strlen(user) == 0)
 		ereport(FATAL, (errmsg("Primary Addr and Username required")));
 
+	/*
+	 * Create primary mode trigger file.
+	 */
 	ereport(WARNING, (errmsg("ssh %s@%s \"touch %s/primary_mode\"", user, host, HATriggerDir)));
 	sprintf(cmd, "ssh %s@%s \"touch %s/primary_mode\"", user, host, HATriggerDir);
 	/* This test is not working */
 	if(system(cmd) < 0)
 		ereport(FATAL, (errmsg("Cannot create trigger: %s", cmd)));
 
+	/*
+	 * Create standby mode trigger file
+	 */
 	if(system("touch pg_tmp/standby_mode") < 0)
 		ereport(FATAL, (errmsg("Cannot create trigger: pg_tmp/standby_mode")));
+
+	/*
+	 * Delete stop log truncation file at primary.
+	 */
+	ereport(WARNING, (errmsg("ssh %s@%s \"rm %s/stop_log_truncate\"", user, host, HATriggerDir)));
+	sprintf(cmd, "ssh %s@%s \"rm %s/stop_log_truncate\"", user, host, HATriggerDir);
+	/* This test is not working */
+	if(system(cmd) < 0)
+		ereport(FATAL, (errmsg("Cannot rm: pg_tmp/stop_log_truncate: %s", cmd)));
+
+	/*
+	 * Delete stop log truncation file at standby.
+	 */
+	if(system("rm pg_tmp/stop_log_truncate") < 0)
+		ereport(FATAL, (errmsg("Cannot rm: pg_tmp/stop_log_truncate")));
 
 	/* debugging output */
 	gettimeofday(&tv, NULL);
@@ -8218,7 +8249,9 @@ CreateCheckPoint(int flags)
 	{
 		KeepLogSeg(recptr, &_logId, &_logSeg);
 		PrevLogSeg(_logId, _logSeg);
-		RemoveOldXlogFiles(_logId, _logSeg, recptr);
+		if (!is_stop_log_truncate() && !is_primary_mode()) {
+			RemoveOldXlogFiles(_logId, _logSeg, recptr);
+		}
 	}
 
 	/*
@@ -8298,8 +8331,9 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 		if (RmgrTable[rmid].rm_safe_restartpoint != NULL)
 			if (!(RmgrTable[rmid].rm_safe_restartpoint()))
 			{
-				elog(trace_recovery(DEBUG2),
-					 "RM %d not safe to record restart point at %X/%X",
+				//elog(trace_recovery(DEBUG2),
+				elog(WARNING,
+					 "RecoveryRestartPoint: RM %d not safe to record restart point at %X/%X",
 					 rmid,
 					 checkPoint->redo.xlogid,
 					 checkPoint->redo.xrecoff);
@@ -8316,8 +8350,9 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 	 */
 	if (XLogHaveInvalidPages())
 	{
-		elog(trace_recovery(DEBUG2),
-			 "could not record restart point at %X/%X because there "
+		//elog(trace_recovery(DEBUG2),
+		elog(WARNING,
+			 "RecoveryRestartPoint: could not record restart point at %X/%X because there "
 			 "are unresolved references to invalid pages",
 			 checkPoint->redo.xlogid,
 			 checkPoint->redo.xrecoff);
@@ -8332,6 +8367,10 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 	XLogCtl->lastCheckPointRecPtr = ReadRecPtr;
 	memcpy(&XLogCtl->lastCheckPoint, checkPoint, sizeof(CheckPoint));
 	SpinLockRelease(&xlogctl->info_lck);
+
+	// Can truncate shared log records here
+	elog(WARNING,
+		"Received checkpoint redo log from Primary: ");
 }
 
 /*
@@ -8375,7 +8414,7 @@ CreateRestartPoint(int flags)
 	 */
 	if (!RecoveryInProgress())
 	{
-		ereport(DEBUG2,
+		ereport(WARNING,
 			  (errmsg("skipping restartpoint, recovery has already ended")));
 		LWLockRelease(CheckpointLock);
 		return false;
@@ -8398,7 +8437,7 @@ CreateRestartPoint(int flags)
 	if (XLogRecPtrIsInvalid(lastCheckPointRecPtr) ||
 		XLByteLE(lastCheckPoint.redo, ControlFile->checkPointCopy.redo))
 	{
-		ereport(DEBUG2,
+		ereport(WARNING,
 				(errmsg("skipping restartpoint, already performed at %X/%X",
 				  lastCheckPoint.redo.xlogid, lastCheckPoint.redo.xrecoff)));
 

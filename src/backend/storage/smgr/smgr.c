@@ -709,6 +709,16 @@ AtEOXact_SMgr(void)
 }
 
 bool
+is_stop_log_truncate() {
+	int res = access("pg_tmp/stop_log_truncate", F_OK);
+
+	if(res == 0)
+		return true;
+	else
+		return false;
+}
+
+bool
 is_primary_mode()
 {
 	int res = access("pg_tmp/primary_mode", F_OK);

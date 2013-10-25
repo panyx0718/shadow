@@ -54,6 +54,10 @@ pg_start_backup(PG_FUNCTION_ARGS)
 
 	backupidstr = text_to_cstring(backupid);
 
+	if (system("touch pg_tmp/stop_log_truncate") < 0) {
+		ereport(FATAL,
+				(errmsg("cannot create stop_log_truncate")));
+	}
 	startpoint = do_pg_start_backup(backupidstr, fast, NULL);
 
 	snprintf(startxlogstr, sizeof(startxlogstr), "%X/%X",
