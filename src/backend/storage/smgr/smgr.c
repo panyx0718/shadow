@@ -783,9 +783,6 @@ init_last_block_hash()
 	if(hash == NULL) {
 		ereport(PANIC,
 				(errmsg("cannot attach to last_block_hash")));
-	} else {
-		ereport(WARNING,
-				(errmsg("get_last_block_hash: LastBlockHash:%p", hash)));
 	}
 
 	return hash;
@@ -873,12 +870,8 @@ init_block_lsn_hash()
 	if(hash == NULL) {
 		ereport(PANIC,
 				(errmsg("cannot init block_lsn_hash")));
-	} else {
-		gettimeofday(&tv, NULL);
-		xp_stack_trace(TRACE_SIZE, tv);
-		ereport(WARNING,
-				(errmsg("get_block_lsn_hash: LastBlockHash:%p", hash)));
 	}
+
 	return hash;
 }
 

@@ -3544,6 +3544,7 @@ RemoveOldXlogFiles(uint32 log, uint32 seg, XLogRecPtr endptr)
 			if (RecoveryInProgress() || XLogArchiveCheckDone(xlde->d_name))
 			{
 				snprintf(path, MAXPGPATH, XLOGDIR "/%s", xlde->d_name);
+				snprintf(tmppath, MAXPGPATH, "%s/%s", SharedLogDir, xlde->d_name);
 
 				/* Update the last removed location in shared memory first */
 				UpdateLastRemovedPtr(xlde->d_name);
@@ -3562,7 +3563,6 @@ RemoveOldXlogFiles(uint32 log, uint32 seg, XLogRecPtr endptr)
 						if(SharedLogDir == NULL) {
 							readRecoveryCommandFile();
 						}
-						snprintf(tmppath, MAXPGPATH, "%s/%s", SharedLogDir, xlde->d_name);
 						unlink(tmppath);
 
 						ereport(WARNING,
@@ -3584,8 +3584,8 @@ RemoveOldXlogFiles(uint32 log, uint32 seg, XLogRecPtr endptr)
 					int			rc;
 
 					ereport(WARNING,
-							(errmsg("removing transaction log file \"%s\"",
-									xlde->d_name)));
+							(errmsg("removing transaction log file \"%s\" and %s",
+									xlde->d_name, tmppath)));
 
 #ifdef WIN32
 
@@ -3612,8 +3612,10 @@ RemoveOldXlogFiles(uint32 log, uint32 seg, XLogRecPtr endptr)
 						continue;
 					}
 					rc = unlink(newpath);
+					unlink(tmppath);
 #else
 					rc = unlink(path);
+					unlink(tmppath);
 #endif
 					if (rc != 0)
 					{
@@ -7239,6 +7241,12 @@ SetupTrigger(void)
 		ereport(FATAL, (errmsg("Primary Addr and Username required")));
 
 	/*
+	 * remove the original primary_mode if exists.
+	 * It might be copied from the Primary by the second Standby creation.
+	 */
+	unlink("pg_tmp/primary_mode");
+
+	/*
 	 * Create primary mode trigger file.
 	 */
 	ereport(WARNING, (errmsg("ssh %s@%s \"touch %s/primary_mode\"", user, host, HATriggerDir)));
@@ -8144,8 +8152,9 @@ CreateCheckPoint(int flags)
 	 * panic. Accordingly, exit critical section while doing it.
 	 */
 	END_CRIT_SECTION();
-
-	CheckPointGuts(checkPoint.redo, flags);
+	if (!is_primary_mode()) {
+		CheckPointGuts(checkPoint.redo, flags);
+	}
 
 	/*
 	 * Take a snapshot of running transactions and write this to WAL. This
