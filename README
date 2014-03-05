@@ -1,28 +1,26 @@
-PostgreSQL Database Management System
-=====================================
+SHADOW systems
 
-This directory contains the source code distribution of the PostgreSQL
-database management system.
+A new High Availability database system model.
+Free you Active node (a.k.a. Primary, Master) from database writing overhead.
 
-PostgreSQL is an advanced object-relational database management system
-that supports an extended subset of the SQL standard, including
-transactions, foreign keys, subqueries, triggers, user-defined types
-and functions.  This distribution also contains C language bindings.
+Various High Availability DataBase systems (HADB) are used to provide high availability.
+Pairing an active database system with a standby system is one commonly used HADB
+techniques. The active system serves read/write workloads. One or more standby systems
+replicate the active and serve read-only workloads. Though widely used, this technique has
+some significant drawbacks: The active system becomes the bottleneck under heavy write
+workloads. Replicating changes synchronously from the active to the standbys further
+reduces the performance of the active system. Asynchronous replication, however, risk the
+loss of updates during failover. The shared-nothing architecture of active-standby systems
+is unnecessarily complex and cost inefficient.
 
-PostgreSQL has many language interfaces, many of which are listed here:
-
-	http://www.postgresql.org/download
-
-See the file INSTALL for instructions on how to build and install
-PostgreSQL.  That file also lists supported operating systems and
-hardware platforms and contains information regarding any other
-software packages that are required to build or run the PostgreSQL
-system.  Changes between all PostgreSQL releases are recorded in the
-file HISTORY.  Copyright and license information can be found in the
-file COPYRIGHT.  A comprehensive documentation set is included in this
-distribution; it can be read as described in the installation
-instructions.
-
-The latest version of this software may be obtained at
-http://www.postgresql.org/download/.  For more information look at our
-web site located at http://www.postgresql.org/.
+We present SHADOW systems, a new technique for database high availability.
+In a SHADOW system, the responsibility for database replication is pushed from
+the database systems into a shared, reliable, storage system. The active and standby systems
+share access to a single logical copy of the database, which resides in shared storage.
+SHADOW introduces write offloading, which frees the active system from the need to
+update the persistent database, placing that responsibility on the underutilized standby
+system instead. By exploiting shared storage, SHADOW systems avoid the overhead of
+database-managed synchronized replication, while ensuring that no updates will be lost
+during a failover. We have implemented a SHADOW system using PostgreSQL, and we
+present the results of a performance evaluation that shows that the SHADOW system can
+outperform both traditional synchronous replication and standalone PostgreSQL systems. 
