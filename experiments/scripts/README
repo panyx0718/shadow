@@ -1,0 +1,10 @@
+the scripts in active should be put in ~/pg_hack/ha/ of both active and standby
+the scripts in nfs should be put in ~ of nfs
+
+init experiment
+
+0.prepare the nfs
+1.set global_var.sh in both active and standby
+2.set recovery.conf in standby.sh
+3.call initenv.sh in both active and standby
+4.call copyha.sh to init shadow environment. Or call copysingle.sh to init standalone

@@ -1,0 +1,3 @@
+
+call init.sh if you need to init ebs partition
+call mount_nfs.sh to mount ebs

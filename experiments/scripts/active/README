@@ -1,0 +1,2 @@
+scripts are used for SHADOW and StandAlone experiments.
+copy the scripts to standby and set the configuration files (recovery.conf, etc)
