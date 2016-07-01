@@ -1,6 +1,9 @@
-SHADOW systems
+Database High Availability Using SHADOW Systems
 
-A new High Availability database system model.
+Best paper award in ACM Symposium on Cloud Computing 2015
+
+===============================
+
 Free you Active node (a.k.a. Primary, Master) from database writing overhead.
 
 Various High Availability DataBase systems (HADB) are used to provide high availability.
